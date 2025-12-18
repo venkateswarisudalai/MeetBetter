@@ -36,6 +36,8 @@ function App() {
   const [autoGenerateReplies, setAutoGenerateReplies] = useState(true);
   const [isTranscribingRecording, setIsTranscribingRecording] = useState(false);
   const [isEditingApiKey, setIsEditingApiKey] = useState(false);
+  const [meetingContext, setMeetingContext] = useState("");
+  const [contextInput, setContextInput] = useState("");
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
@@ -125,8 +127,13 @@ function App() {
     try {
       const state = await invoke<{
         has_groq_key: boolean;
+        meeting_context: string;
       }>("get_meeting_state");
       setHasGroqKey(state.has_groq_key);
+      if (state.meeting_context) {
+        setMeetingContext(state.meeting_context);
+        setContextInput(state.meeting_context);
+      }
     } catch (error) {
       setHasGroqKey(false);
     }
@@ -147,6 +154,15 @@ function App() {
       console.error("Failed to save API key:", error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSaveContext = async () => {
+    try {
+      await invoke("set_meeting_context", { context: contextInput.trim() });
+      setMeetingContext(contextInput.trim());
+    } catch (error) {
+      console.error("Failed to save meeting context:", error);
     }
   };
 
@@ -389,6 +405,23 @@ function App() {
                 <span className="toggle-track"></span>
               </div>
             </label>
+          </div>
+
+          {/* Meeting Context */}
+          <div className="setting-group">
+            <label className="setting-label">Meeting Context</label>
+            <p className="setting-hint">Help AI suggest better replies</p>
+            <textarea
+              className="context-input"
+              placeholder="e.g., Sales call with enterprise client, discussing pricing. I'm the account manager."
+              value={contextInput}
+              onChange={(e) => setContextInput(e.target.value)}
+              onBlur={handleSaveContext}
+              rows={3}
+            />
+            {meetingContext && contextInput === meetingContext && (
+              <span className="context-saved">Saved</span>
+            )}
           </div>
 
           {/* Privacy */}
