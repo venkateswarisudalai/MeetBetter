@@ -38,6 +38,7 @@ function App() {
   const [isEditingApiKey, setIsEditingApiKey] = useState(false);
   const [meetingContext, setMeetingContext] = useState("");
   const [contextInput, setContextInput] = useState("");
+  const [replyError, setReplyError] = useState<string | null>(null);
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
@@ -113,11 +114,21 @@ function App() {
     if (isGeneratingReplies || !hasGroqKey) return;
 
     setIsGeneratingReplies(true);
+    setReplyError(null);
     try {
       const replies = await invoke<string[]>("generate_auto_replies");
       setSuggestedReplies(replies);
+      setReplyError(null);
     } catch (error) {
       console.error("Failed to generate replies:", error);
+      const errorMsg = String(error);
+      if (errorMsg.includes("rate") || errorMsg.includes("429") || errorMsg.includes("limit")) {
+        setReplyError("Rate limited - waiting before retrying");
+      } else if (errorMsg.includes("timeout") || errorMsg.includes("Timeout")) {
+        setReplyError("Request timed out - will retry");
+      } else {
+        setReplyError(errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg);
+      }
     } finally {
       setIsGeneratingReplies(false);
     }
@@ -262,11 +273,21 @@ function App() {
     if (transcription.length === 0 || !hasGroqKey) return;
 
     setIsGeneratingReplies(true);
+    setReplyError(null);
     try {
       const replies = await invoke<string[]>("generate_auto_replies");
       setSuggestedReplies(replies);
+      setReplyError(null);
     } catch (error) {
       console.error("Failed to generate replies:", error);
+      const errorMsg = String(error);
+      if (errorMsg.includes("rate") || errorMsg.includes("429") || errorMsg.includes("limit")) {
+        setReplyError("Rate limited - please wait before retrying");
+      } else if (errorMsg.includes("timeout") || errorMsg.includes("Timeout")) {
+        setReplyError("Request timed out");
+      } else {
+        setReplyError(errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg);
+      }
     } finally {
       setIsGeneratingReplies(false);
     }
@@ -491,10 +512,6 @@ function App() {
             </div>
           )}
         </div>
-
-        <div className="sidebar-footer">
-          Powered by Groq
-        </div>
       </aside>
 
       {/* Main Content */}
@@ -573,6 +590,12 @@ function App() {
                 <h3>Suggested Replies</h3>
                 {isGeneratingReplies && <span className="loading-dot"></span>}
               </div>
+              {replyError && (
+                <div className="reply-error">
+                  <span className="error-icon">⚠️</span>
+                  <span>{replyError}</span>
+                </div>
+              )}
               {suggestedReplies.length > 0 ? (
                 <div className="replies-list">
                   {suggestedReplies.map((reply, i) => (
