@@ -948,4 +948,53 @@ body {
   .generating-badge {
     background: #1a3a5a;
   }
+
+  .context-input {
+    background: #2c2c2e;
+    border-color: #3a3a3c;
+    color: #f5f5f7;
+  }
+
+  .context-input:focus {
+    border-color: var(--accent);
+  }
+}
+
+/* Context Input */
+.context-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg-secondary);
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.4;
+}
+
+.context-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+
+.context-input::placeholder {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.setting-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  margin-top: -6px;
+}
+
+.context-saved {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--success);
+  margin-top: 4px;
 }

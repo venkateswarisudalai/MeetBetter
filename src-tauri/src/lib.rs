@@ -12,6 +12,9 @@ mod deepgram;
 mod groq;
 mod realtime;
 mod screen_share;
+mod settings;
+
+use settings::AppSettings;
 
 use deepgram::DeepgramTranscriber;
 
@@ -47,27 +50,51 @@ pub struct AppState {
     pub live_stop_signal: Arc<Mutex<Option<mpsc::Sender<()>>>>,
     pub deepgram_transcriber: Arc<Mutex<Option<DeepgramTranscriber>>>,
     pub deepgram_stop_flag: Arc<AtomicBool>,
+    pub settings: Arc<Mutex<AppSettings>>,
+    pub meeting_context: Arc<Mutex<String>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
+        // Load persisted settings from disk
+        let saved_settings = AppSettings::load();
+
+        // Parse transcription provider from saved settings
+        let provider = match saved_settings.transcription_provider.to_lowercase().as_str() {
+            "deepgram" => TranscriptionProvider::Deepgram,
+            "assemblyai" => TranscriptionProvider::AssemblyAI,
+            _ => TranscriptionProvider::Groq,
+        };
+
+        // Use saved model or default
+        let model = if saved_settings.selected_model.is_empty() {
+            "llama-3.1-8b-instant".to_string()
+        } else {
+            saved_settings.selected_model.clone()
+        };
+
+        eprintln!("Loaded settings - Groq key present: {}, Model: {}",
+            !saved_settings.groq_api_key.is_empty(), model);
+
         Self {
             is_recording: Arc::new(Mutex::new(false)),
             is_live_transcribing: Arc::new(Mutex::new(false)),
             transcription: Arc::new(Mutex::new(Vec::new())),
             summary: Arc::new(Mutex::new(String::new())),
             suggested_replies: Arc::new(Mutex::new(Vec::new())),
-            selected_model: Arc::new(Mutex::new("llama-3.1-8b-instant".to_string())),
-            transcription_provider: Arc::new(Mutex::new(TranscriptionProvider::default())),
-            groq_api_key: Arc::new(Mutex::new(String::new())),
-            assemblyai_api_key: Arc::new(Mutex::new(String::new())),
-            deepgram_api_key: Arc::new(Mutex::new(String::new())),
+            selected_model: Arc::new(Mutex::new(model)),
+            transcription_provider: Arc::new(Mutex::new(provider)),
+            groq_api_key: Arc::new(Mutex::new(saved_settings.groq_api_key.clone())),
+            assemblyai_api_key: Arc::new(Mutex::new(saved_settings.assemblyai_api_key.clone())),
+            deepgram_api_key: Arc::new(Mutex::new(saved_settings.deepgram_api_key.clone())),
             audio_recorder: Arc::new(Mutex::new(None)),
             current_recording_path: Arc::new(Mutex::new(None)),
             is_transcribing: Arc::new(Mutex::new(false)),
             live_stop_signal: Arc::new(Mutex::new(None)),
             deepgram_transcriber: Arc::new(Mutex::new(None)),
             deepgram_stop_flag: Arc::new(AtomicBool::new(false)),
+            settings: Arc::new(Mutex::new(saved_settings.clone())),
+            meeting_context: Arc::new(Mutex::new(saved_settings.meeting_context)),
         }
     }
 }
@@ -93,6 +120,7 @@ pub struct MeetingState {
     pub has_assemblyai_key: bool,
     pub has_deepgram_key: bool,
     pub current_recording_path: Option<String>,
+    pub meeting_context: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -389,6 +417,7 @@ async fn get_meeting_state(state: State<'_, AppState>) -> Result<MeetingState, S
         has_assemblyai_key,
         has_deepgram_key,
         current_recording_path: state.current_recording_path.lock().map_err(|e| e.to_string())?.clone(),
+        meeting_context: state.meeting_context.lock().map_err(|e| e.to_string())?.clone(),
     })
 }
 
@@ -399,13 +428,22 @@ async fn set_groq_api_key(state: State<'_, AppState>, key: String) -> Result<boo
         return Ok(false);
     }
 
-    // Save the key first
+    // Save the key to memory
     *state.groq_api_key.lock().map_err(|e| e.to_string())? = key.clone();
+
+    // Persist to disk
+    {
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.groq_api_key = key.clone();
+        if let Err(e) = settings.save() {
+            eprintln!("Failed to persist settings: {}", e);
+        }
+    }
 
     // Optionally verify with API (but don't block on failure)
     match groq::check_api_key(&key).await {
         Ok(true) => {
-            eprintln!("Groq API key verified successfully");
+            eprintln!("Groq API key verified and saved successfully");
             Ok(true)
         }
         Ok(false) => {
@@ -424,7 +462,15 @@ async fn set_groq_api_key(state: State<'_, AppState>, key: String) -> Result<boo
 #[tauri::command]
 async fn set_assemblyai_api_key(state: State<'_, AppState>, key: String) -> Result<bool, String> {
     if !key.is_empty() {
-        *state.assemblyai_api_key.lock().map_err(|e| e.to_string())? = key;
+        *state.assemblyai_api_key.lock().map_err(|e| e.to_string())? = key.clone();
+
+        // Persist to disk
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.assemblyai_api_key = key;
+        if let Err(e) = settings.save() {
+            eprintln!("Failed to persist settings: {}", e);
+        }
+
         Ok(true)
     } else {
         Ok(false)
@@ -434,7 +480,15 @@ async fn set_assemblyai_api_key(state: State<'_, AppState>, key: String) -> Resu
 #[tauri::command]
 async fn set_deepgram_api_key(state: State<'_, AppState>, key: String) -> Result<bool, String> {
     if !key.is_empty() {
-        *state.deepgram_api_key.lock().map_err(|e| e.to_string())? = key;
+        *state.deepgram_api_key.lock().map_err(|e| e.to_string())? = key.clone();
+
+        // Persist to disk
+        let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.deepgram_api_key = key;
+        if let Err(e) = settings.save() {
+            eprintln!("Failed to persist settings: {}", e);
+        }
+
         Ok(true)
     } else {
         Ok(false)
@@ -443,7 +497,15 @@ async fn set_deepgram_api_key(state: State<'_, AppState>, key: String) -> Result
 
 #[tauri::command]
 async fn set_model(state: State<'_, AppState>, model: String) -> Result<(), String> {
-    *state.selected_model.lock().map_err(|e| e.to_string())? = model;
+    *state.selected_model.lock().map_err(|e| e.to_string())? = model.clone();
+
+    // Persist to disk
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.selected_model = model;
+    if let Err(e) = settings.save() {
+        eprintln!("Failed to persist settings: {}", e);
+    }
+
     Ok(())
 }
 
@@ -456,6 +518,29 @@ async fn set_transcription_provider(state: State<'_, AppState>, provider: String
         _ => return Err(format!("Unknown provider: {}", provider)),
     };
     *state.transcription_provider.lock().map_err(|e| e.to_string())? = provider_enum;
+
+    // Persist to disk
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.transcription_provider = provider;
+    if let Err(e) = settings.save() {
+        eprintln!("Failed to persist settings: {}", e);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_meeting_context(state: State<'_, AppState>, context: String) -> Result<(), String> {
+    *state.meeting_context.lock().map_err(|e| e.to_string())? = context.clone();
+
+    // Persist to disk
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.meeting_context = context;
+    if let Err(e) = settings.save() {
+        eprintln!("Failed to persist settings: {}", e);
+    }
+
+    eprintln!("Meeting context updated");
     Ok(())
 }
 
@@ -770,6 +855,7 @@ async fn generate_auto_replies(
     let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
     let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
+    let meeting_context = state.meeting_context.lock().map_err(|e| e.to_string())?.clone();
 
     if api_key.is_empty() {
         return Err("Groq API key not set. Please add it in Settings.".to_string());
@@ -800,10 +886,17 @@ async fn generate_auto_replies(
     // Detect the last speaker's intent
     let last_segment = transcription.last().map(|s| s.text.clone()).unwrap_or_default();
 
+    // Build meeting context section if provided
+    let meeting_context_section = if !meeting_context.is_empty() {
+        format!("MEETING CONTEXT (use this to tailor your responses):\n{}\n\n", meeting_context)
+    } else {
+        String::new()
+    };
+
     let prompt = format!(
         r#"You are an AI assistant helping someone participate in a real-time meeting. Generate smart, contextual reply suggestions instantly.
 
-CONVERSATION CONTEXT:
+{}CONVERSATION TRANSCRIPT:
 {}
 
 MOST RECENT (what was just said):
@@ -816,6 +909,7 @@ Generate 4 quick reply suggestions the user can say RIGHT NOW. Requirements:
 2. Reference specific details from the conversation
 3. Sound natural and professional
 4. Keep it SHORT (1 sentence preferred, 2 max)
+5. If meeting context is provided, tailor responses to that context (e.g., use appropriate tone for sales calls vs internal meetings)
 
 Reply types (pick the most appropriate for the situation):
 • Answer if a question was asked
@@ -827,7 +921,7 @@ Reply types (pick the most appropriate for the situation):
 
 Format: Return exactly 4 replies, numbered 1-4, one per line.
 DO NOT use generic filler like "Great point" - be specific and actionable."#,
-        full_context, recent_statements, last_segment
+        meeting_context_section, full_context, recent_statements, last_segment
     );
 
     eprintln!("Generating contextual auto replies from transcript...");
@@ -887,6 +981,7 @@ pub fn run() {
             set_deepgram_api_key,
             set_model,
             set_transcription_provider,
+            set_meeting_context,
             get_transcription_providers,
             get_available_models,
             add_transcription,
