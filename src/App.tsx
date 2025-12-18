@@ -340,7 +340,7 @@ function App() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <span className="logo-icon">🎙️</span>
-          <span className="logo-text">WiselyMeet</span>
+          <span className="logo-text">MeetBetter</span>
         </div>
 
         <div className="sidebar-content">

@@ -22,7 +22,7 @@ impl AppSettings {
     /// Get the path to the settings file
     fn get_settings_path() -> Option<PathBuf> {
         dirs::config_dir().map(|mut path| {
-            path.push("wiselymeet");
+            path.push("meetbetter");
             path.push("settings.json");
             path
         })
