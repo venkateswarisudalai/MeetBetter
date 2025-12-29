@@ -17,7 +17,7 @@ mod settings;
 
 use settings::AppSettings;
 
-use deepgram::DeepgramTranscriber;
+use deepgram::{DeepgramTranscriber, TranscriptMessage};
 
 /// Transcription provider options
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -141,6 +141,7 @@ struct TranscriptEvent {
     text: String,
     timestamp: String,
     speaker: String,
+    is_final: bool,  // true = finalized transcript, false = interim (still being transcribed)
 }
 
 // Commands
@@ -218,12 +219,12 @@ async fn start_live_transcription(
 
     match provider {
         TranscriptionProvider::Deepgram => {
-            // Use Deepgram real-time streaming
-            eprintln!("Using Deepgram for real-time transcription...");
+            // Use Deepgram real-time streaming with optimized parameters
+            eprintln!("Using Deepgram for real-time transcription (nova-2, 100ms endpointing)...");
             state.deepgram_stop_flag.store(false, Ordering::SeqCst);
 
-            // Create channel for receiving transcripts
-            let (tx, mut rx) = mpsc::channel::<String>(100);
+            // Create channel for receiving transcripts (now includes is_final flag)
+            let (tx, mut rx) = mpsc::channel::<TranscriptMessage>(100);
             let transcriber = DeepgramTranscriber::new(tx);
 
             let app_clone = app.clone();
@@ -231,22 +232,46 @@ async fn start_live_transcription(
 
             // Spawn task to handle incoming transcripts
             tokio::spawn(async move {
-                while let Some(text) = rx.recv().await {
-                    if !text.is_empty() {
-                        let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+                // Track interim text to replace with final
+                let mut current_interim_index: Option<usize> = None;
 
+                while let Some(msg) = rx.recv().await {
+                    if msg.text.is_empty() {
+                        continue;
+                    }
+
+                    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+
+                    if msg.is_final {
+                        // Final transcript - add to transcription history
                         if let Ok(mut trans) = transcription_state.lock() {
+                            // If we had an interim result, remove it
+                            if let Some(idx) = current_interim_index.take() {
+                                if idx < trans.len() {
+                                    trans.remove(idx);
+                                }
+                            }
                             trans.push(TranscriptSegment {
                                 timestamp: timestamp.clone(),
                                 speaker: "Speaker".to_string(),
-                                text: text.clone(),
+                                text: msg.text.clone(),
                             });
                         }
 
                         let _ = app_clone.emit("transcript-update", TranscriptEvent {
-                            text,
+                            text: msg.text,
                             timestamp,
                             speaker: "Speaker".to_string(),
+                            is_final: true,
+                        });
+                    } else {
+                        // Interim result - emit for real-time UI feedback
+                        // Don't add to permanent transcription yet
+                        let _ = app_clone.emit("transcript-update", TranscriptEvent {
+                            text: msg.text,
+                            timestamp,
+                            speaker: "Speaker".to_string(),
+                            is_final: false,
                         });
                     }
                 }
@@ -345,6 +370,7 @@ async fn start_live_transcription(
                                                         text: new_text,
                                                         timestamp,
                                                         speaker: "Speaker".to_string(),
+                                                        is_final: true,
                                                     });
 
                                                     eprintln!("New transcript segment emitted");

@@ -533,6 +533,34 @@ body {
   color: var(--text);
 }
 
+/* Interim transcript (still being transcribed) */
+.transcript-item.interim {
+  opacity: 0.7;
+  position: relative;
+}
+
+.transcript-item.interim p {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.interim-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--border-light);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 /* Right Panel */
 .right-panel {
   width: 360px;

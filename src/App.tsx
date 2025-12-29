@@ -7,6 +7,7 @@ interface TranscriptSegment {
   timestamp: string;
   speaker: string;
   text: string;
+  is_final?: boolean;  // true = finalized, false = interim (still being transcribed)
 }
 
 interface MeetingSummary {
@@ -96,18 +97,38 @@ function App() {
   };
 
   useEffect(() => {
-    const unlisten = listen<{ text: string; timestamp: string; speaker: string }>(
+    const unlisten = listen<{ text: string; timestamp: string; speaker: string; is_final: boolean }>(
       "transcript-update",
       (event) => {
         if (event.payload.text && event.payload.text.trim()) {
-          setTranscription((prev) => [
-            ...prev,
-            {
-              timestamp: event.payload.timestamp,
-              speaker: event.payload.speaker,
-              text: event.payload.text,
-            },
-          ]);
+          const newSegment: TranscriptSegment = {
+            timestamp: event.payload.timestamp,
+            speaker: event.payload.speaker,
+            text: event.payload.text,
+            is_final: event.payload.is_final,
+          };
+
+          setTranscription((prev) => {
+            if (event.payload.is_final) {
+              // Final result - add to transcript (remove any trailing interim first)
+              const lastIndex = prev.length - 1;
+              if (lastIndex >= 0 && prev[lastIndex].is_final === false) {
+                // Replace interim with final
+                return [...prev.slice(0, lastIndex), newSegment];
+              }
+              // Just add the final result
+              return [...prev, newSegment];
+            } else {
+              // Interim result - replace previous interim or add new one
+              const lastIndex = prev.length - 1;
+              if (lastIndex >= 0 && prev[lastIndex].is_final === false) {
+                // Replace existing interim
+                return [...prev.slice(0, lastIndex), newSegment];
+              }
+              // Add new interim
+              return [...prev, newSegment];
+            }
+          });
         }
       }
     );
@@ -623,9 +644,15 @@ function App() {
               ) : (
                 <div className="transcript-list">
                   {transcription.map((seg, i) => (
-                    <div key={i} className="transcript-item">
+                    <div
+                      key={i}
+                      className={`transcript-item ${seg.is_final === false ? 'interim' : ''}`}
+                    >
                       <span className="time">{seg.timestamp}</span>
                       <p>{seg.text}</p>
+                      {seg.is_final === false && (
+                        <span className="interim-badge">typing...</span>
+                      )}
                     </div>
                   ))}
                   <div ref={transcriptionEndRef} />
