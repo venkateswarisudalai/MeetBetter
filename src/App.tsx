@@ -39,6 +39,7 @@ function App() {
   const [meetingContext, setMeetingContext] = useState("");
   const [contextInput, setContextInput] = useState("");
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [isMockTranscribing, setIsMockTranscribing] = useState(false);
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
@@ -48,6 +49,33 @@ function App() {
     checkApiKeys();
     checkScreenShareSupport();
   }, []);
+
+  // Dev mode: Mock transcription handler
+  const handleMockTranscription = async () => {
+    if (isMockTranscribing) {
+      console.log('Stopping mock transcription...');
+      try {
+        await invoke('stop_mock_transcription');
+        setIsMockTranscribing(false);
+        console.log('Mock transcription stopped');
+      } catch (err) {
+        console.error('Failed to stop mock:', err);
+      }
+    } else {
+      console.log('Starting mock transcription...');
+      try {
+        // Uses files: you_1.wav, participant_1.wav, you_2.wav, participant_2.wav, etc.
+        const result = await invoke('start_mock_transcription', {
+          testAudioDir: '/Users/vigneshsubbiah/Documents/MeetBetter/src-tauri/test_audio'
+        });
+        setIsMockTranscribing(true);
+        console.log('Mock transcription started:', result);
+      } catch (err) {
+        console.error('Failed to start mock:', err);
+        alert('Mock transcription failed: ' + err);
+      }
+    }
+  };
 
   const checkScreenShareSupport = async () => {
     try {
@@ -94,10 +122,17 @@ function App() {
     transcriptionEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcription]);
 
-  // Auto-generate replies when new transcription arrives (during recording)
+  // Auto-generate replies when new transcription arrives (during recording or mock mode)
+  // Only generate when the last speaker is NOT "You" (i.e., when participant speaks)
   useEffect(() => {
-    if (isLiveTranscribing && autoGenerateReplies && transcription.length > 0 && transcription.length !== lastTranscriptCount.current) {
+    if ((isLiveTranscribing || isMockTranscribing) && autoGenerateReplies && transcription.length > 0 && transcription.length !== lastTranscriptCount.current) {
       lastTranscriptCount.current = transcription.length;
+
+      // Only generate replies when the other person speaks, not when "You" speak
+      const lastSpeaker = transcription[transcription.length - 1]?.speaker;
+      if (lastSpeaker === "You") {
+        return; // Don't generate suggestions for your own speech
+      }
 
       // Time-based debounce - generate replies at most every 5 seconds
       const now = Date.now();
@@ -108,7 +143,7 @@ function App() {
         generateRepliesQuietly();
       }
     }
-  }, [transcription, isLiveTranscribing, autoGenerateReplies]);
+  }, [transcription, isLiveTranscribing, isMockTranscribing, autoGenerateReplies]);
 
   const generateRepliesQuietly = async () => {
     if (isGeneratingReplies || !hasGroqKey) return;
@@ -509,6 +544,23 @@ function App() {
                   {isTranscribingRecording ? "Transcribing..." : "Re-transcribe"}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Dev Mode: Mock Transcription - only visible in development */}
+          {import.meta.env.DEV && (
+            <div className="setting-group" style={{ marginTop: 'auto', borderTop: '1px solid #333', paddingTop: '12px' }}>
+              <label className="setting-label" style={{ color: '#f59e0b' }}>Dev Mode</label>
+              <button
+                className="action-btn"
+                onClick={handleMockTranscription}
+                style={{
+                  backgroundColor: isMockTranscribing ? '#dc2626' : '#7c3aed',
+                  width: '100%'
+                }}
+              >
+                {isMockTranscribing ? "Stop Mock" : "Run Mock Test"}
+              </button>
             </div>
           )}
         </div>
