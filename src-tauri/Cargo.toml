@@ -16,6 +16,10 @@ edition = "2021"
 name = "meetbetter_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "mock_test"
+path = "src/bin/mock_test.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

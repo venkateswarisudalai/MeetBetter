@@ -4,12 +4,13 @@ use std::sync::{
     Arc, Mutex,
 };
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 mod assemblyai;
 mod audio;
 mod deepgram;
-mod groq;
+pub mod groq;  // Public for mock_test binary
+mod mock;
 mod realtime;
 mod screen_share;
 mod settings;
@@ -52,6 +53,9 @@ pub struct AppState {
     pub deepgram_stop_flag: Arc<AtomicBool>,
     pub settings: Arc<Mutex<AppSettings>>,
     pub meeting_context: Arc<Mutex<String>>,
+    // Mock transcription state
+    pub is_mock_transcribing: Arc<Mutex<bool>>,
+    pub mock_stop_signal: Arc<Mutex<Option<watch::Sender<bool>>>>,
 }
 
 impl Default for AppState {
@@ -95,6 +99,9 @@ impl Default for AppState {
             deepgram_stop_flag: Arc::new(AtomicBool::new(false)),
             settings: Arc::new(Mutex::new(saved_settings.clone())),
             meeting_context: Arc::new(Mutex::new(saved_settings.meeting_context)),
+            // Mock transcription state
+            is_mock_transcribing: Arc::new(Mutex::new(false)),
+            mock_stop_signal: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -965,6 +972,70 @@ fn get_screen_share_platform_info() -> String {
     screen_share::get_platform_info().to_string()
 }
 
+/// Start mock transcription using pre-recorded audio files
+/// This is for dev/testing purposes to simulate a live meeting
+/// Expects files named: you_1.wav, participant_1.wav, you_2.wav, participant_2.wav, etc.
+#[tauri::command]
+async fn start_mock_transcription(
+    test_audio_dir: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    // Check if already mock transcribing
+    {
+        let is_mock = state.is_mock_transcribing.lock().map_err(|e| e.to_string())?;
+        if *is_mock {
+            return Err("Mock transcription already running".to_string());
+        }
+    }
+
+    // Get API key
+    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
+    if api_key.is_empty() {
+        return Err("Groq API key not set. Please add it in Settings.".to_string());
+    }
+
+    // Set up stop signal
+    let (stop_tx, stop_rx) = watch::channel(false);
+    *state.mock_stop_signal.lock().map_err(|e| e.to_string())? = Some(stop_tx);
+    *state.is_mock_transcribing.lock().map_err(|e| e.to_string())? = true;
+
+    let config = mock::MockConfig {
+        test_audio_dir: test_audio_dir.clone(),
+    };
+
+    let transcription_state = state.transcription.clone();
+    let is_mock_transcribing = state.is_mock_transcribing.clone();
+
+    // Spawn the mock session
+    tokio::spawn(async move {
+        match mock::run_mock_session(config, &api_key, app, transcription_state, stop_rx).await {
+            Ok(_) => eprintln!("Mock transcription completed successfully"),
+            Err(e) => eprintln!("Mock transcription error: {}", e),
+        }
+
+        // Mark as not running
+        if let Ok(mut is_mock) = is_mock_transcribing.lock() {
+            *is_mock = false;
+        }
+    });
+
+    Ok(format!("Mock transcription started from: {}", test_audio_dir))
+}
+
+/// Stop mock transcription
+#[tauri::command]
+async fn stop_mock_transcription(state: State<'_, AppState>) -> Result<(), String> {
+    // Send stop signal
+    if let Some(tx) = state.mock_stop_signal.lock().map_err(|e| e.to_string())?.take() {
+        let _ = tx.send(true);
+    }
+
+    *state.is_mock_transcribing.lock().map_err(|e| e.to_string())? = false;
+    eprintln!("Mock transcription stopped");
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -998,6 +1069,8 @@ pub fn run() {
             set_screen_share_exclusion,
             is_screen_share_exclusion_supported,
             get_screen_share_platform_info,
+            start_mock_transcription,
+            stop_mock_transcription,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
