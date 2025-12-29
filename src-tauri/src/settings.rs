@@ -2,6 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Environment variable names for API keys
+/// These take priority over settings file
+pub const ENV_GROQ_API_KEY: &str = "MEETBETTER_GROQ_API_KEY";
+pub const ENV_DEEPGRAM_API_KEY: &str = "MEETBETTER_DEEPGRAM_API_KEY";
+pub const ENV_ASSEMBLYAI_API_KEY: &str = "MEETBETTER_ASSEMBLYAI_API_KEY";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
     #[serde(default)]
@@ -28,8 +34,19 @@ impl AppSettings {
         })
     }
 
-    /// Load settings from disk
+    /// Load settings from disk, with environment variables taking priority
     pub fn load() -> Self {
+        // First, load from config file
+        let mut settings = Self::load_from_file();
+
+        // Then override with environment variables (if set)
+        settings.apply_env_overrides();
+
+        settings
+    }
+
+    /// Load settings from config file only
+    fn load_from_file() -> Self {
         let Some(path) = Self::get_settings_path() else {
             eprintln!("Could not determine config directory");
             return Self::default();
@@ -56,6 +73,34 @@ impl AppSettings {
             Err(e) => {
                 eprintln!("Failed to read settings file: {}", e);
                 Self::default()
+            }
+        }
+    }
+
+    /// Apply environment variable overrides for API keys
+    /// Environment variables take priority over config file
+    fn apply_env_overrides(&mut self) {
+        // Groq API key
+        if let Ok(key) = std::env::var(ENV_GROQ_API_KEY) {
+            if !key.is_empty() {
+                eprintln!("Using Groq API key from environment variable");
+                self.groq_api_key = key;
+            }
+        }
+
+        // Deepgram API key
+        if let Ok(key) = std::env::var(ENV_DEEPGRAM_API_KEY) {
+            if !key.is_empty() {
+                eprintln!("Using Deepgram API key from environment variable");
+                self.deepgram_api_key = key;
+            }
+        }
+
+        // AssemblyAI API key
+        if let Ok(key) = std::env::var(ENV_ASSEMBLYAI_API_KEY) {
+            if !key.is_empty() {
+                eprintln!("Using AssemblyAI API key from environment variable");
+                self.assemblyai_api_key = key;
             }
         }
     }

@@ -42,6 +42,7 @@ base64 = "0.21"
 url = "2.5"
 urlencoding = "2.1"
 dirs = "5.0"
+dotenvy = "0.15"  # Load .env files
 
 # Platform-specific dependencies for screen share exclusion
 [target.'cfg(target_os = "macos")'.dependencies]

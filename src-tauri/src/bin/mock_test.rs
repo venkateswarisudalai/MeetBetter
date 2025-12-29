@@ -12,32 +12,44 @@ use std::sync::{Arc, Mutex};
 use meetbetter_lib::groq;
 
 const TEST_AUDIO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test_audio");
+const ENV_GROQ_API_KEY: &str = "MEETBETTER_GROQ_API_KEY";
 
 #[tokio::main]
 async fn main() {
     println!("=== MeetBetter Mock Integration Test ===\n");
 
-    // Load API key from settings
-    let settings_path = dirs::config_dir()
-        .unwrap()
-        .join("meetbetter")
-        .join("settings.json");
+    // Load .env file if it exists
+    let _ = dotenvy::dotenv();
 
-    let api_key = if settings_path.exists() {
-        let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
-        json["groq_api_key"].as_str().unwrap_or("").to_string()
-    } else {
-        String::new()
-    };
+    // Try to get API key from environment variable first, then settings file
+    let api_key = std::env::var(ENV_GROQ_API_KEY)
+        .ok()
+        .filter(|k| !k.is_empty())
+        .or_else(|| {
+            // Fallback to settings file
+            let settings_path = dirs::config_dir()?.join("meetbetter").join("settings.json");
+            if settings_path.exists() {
+                let content = std::fs::read_to_string(&settings_path).ok()?;
+                let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+                json["groq_api_key"].as_str().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
 
     if api_key.is_empty() {
-        eprintln!("ERROR: No Groq API key found in settings.");
-        eprintln!("Please set your API key in the app first.");
+        eprintln!("ERROR: No Groq API key found.");
+        eprintln!("Set MEETBETTER_GROQ_API_KEY environment variable or add key in app settings.");
         std::process::exit(1);
     }
 
-    println!("✓ API key loaded from settings\n");
+    let key_source = if std::env::var(ENV_GROQ_API_KEY).is_ok() {
+        "environment variable"
+    } else {
+        "settings file"
+    };
+    println!("✓ API key loaded from {}\n", key_source);
 
     // Collect transcripts
     let transcripts: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
