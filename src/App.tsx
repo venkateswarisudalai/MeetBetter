@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 
 interface TranscriptSegment {
@@ -24,8 +25,11 @@ function App() {
   const [transcription, setTranscription] = useState<TranscriptSegment[]>([]);
   const [summary, setSummary] = useState("");
   const [hasGroqKey, setHasGroqKey] = useState(false);
+  const [hasDeepgramKey, setHasDeepgramKey] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [groqKeyInput, setGroqKeyInput] = useState("");
+  const [deepgramKeyInput, setDeepgramKeyInput] = useState("");
+  const [isEditingDeepgramKey, setIsEditingDeepgramKey] = useState(false);
   const [savedRecordingPath, setSavedRecordingPath] = useState<string | null>(null);
   const [hideFromScreenShare, setHideFromScreenShare] = useState(false);
   const [screenShareSupported, setScreenShareSupported] = useState(false);
@@ -39,17 +43,44 @@ function App() {
   const [isEditingApiKey, setIsEditingApiKey] = useState(false);
   const [meetingContext, setMeetingContext] = useState("");
   const [contextInput, setContextInput] = useState("");
+  const [meetingType, setMeetingType] = useState<string>("custom");
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isMockTranscribing, setIsMockTranscribing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
   const lastReplyGenerationTime = useRef(0);
 
+  // Computed app state for UI layout
+  type AppState = 'ready' | 'recording' | 'done';
+  const appState: AppState = (isLiveTranscribing || isRecordingOnly || isMockTranscribing)
+    ? 'recording'
+    : (transcription.length > 0 ? 'done' : 'ready');
+
   useEffect(() => {
     checkApiKeys();
     checkScreenShareSupport();
   }, []);
+
+  // Keyboard shortcuts: Press 1-4 to copy suggestions
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle 1-4 keys when not in an input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const keyNum = parseInt(e.key);
+      if (keyNum >= 1 && keyNum <= 4 && suggestedReplies.length >= keyNum) {
+        const index = keyNum - 1;
+        handleCopyReply(suggestedReplies[index], index);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [suggestedReplies]);
 
   // Dev mode: Mock transcription handler
   const handleMockTranscription = async () => {
@@ -194,19 +225,22 @@ function App() {
     try {
       const state = await invoke<{
         has_groq_key: boolean;
+        has_deepgram_key: boolean;
         meeting_context: string;
       }>("get_meeting_state");
       setHasGroqKey(state.has_groq_key);
+      setHasDeepgramKey(state.has_deepgram_key);
       if (state.meeting_context) {
         setMeetingContext(state.meeting_context);
         setContextInput(state.meeting_context);
       }
     } catch (error) {
       setHasGroqKey(false);
+      setHasDeepgramKey(false);
     }
   };
 
-  const handleSaveApiKey = async () => {
+  const handleSaveGroqKey = async () => {
     if (!groqKeyInput.trim()) return;
 
     setIsLoading(true);
@@ -218,7 +252,25 @@ function App() {
         setIsEditingApiKey(false);
       }
     } catch (error) {
-      console.error("Failed to save API key:", error);
+      console.error("Failed to save Groq API key:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveDeepgramKey = async () => {
+    if (!deepgramKeyInput.trim()) return;
+
+    setIsLoading(true);
+    try {
+      const isValid = await invoke<boolean>("set_deepgram_api_key", { key: deepgramKeyInput.trim() });
+      if (isValid) {
+        setHasDeepgramKey(true);
+        setDeepgramKeyInput("");
+        setIsEditingDeepgramKey(false);
+      }
+    } catch (error) {
+      console.error("Failed to save Deepgram API key:", error);
     } finally {
       setIsLoading(false);
     }
@@ -234,10 +286,16 @@ function App() {
   };
 
   const handleStartLiveTranscription = async () => {
-    if (!hasGroqKey) return;
+    console.log("handleStartLiveTranscription called, hasGroqKey:", hasGroqKey);
+    if (!hasGroqKey) {
+      console.log("No Groq key, returning early");
+      return;
+    }
 
     try {
+      console.log("Calling start_live_transcription...");
       await invoke("start_live_transcription");
+      console.log("start_live_transcription succeeded");
       setIsLiveTranscribing(true);
       setSuggestedReplies([]);
       lastTranscriptCount.current = 0;
@@ -397,6 +455,42 @@ function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Meeting type presets with context templates
+  const meetingPresets: Record<string, { label: string; context: string }> = {
+    interview: {
+      label: "Interview",
+      context: "Job interview. I'm the candidate. Help me highlight my experience, ask insightful questions about the role, and demonstrate genuine interest. Be confident but not arrogant."
+    },
+    sales: {
+      label: "Sales Call",
+      context: "Sales call with a potential client. I'm the seller. Help me understand their needs, address objections gracefully, build rapport, and guide toward next steps. Focus on value, not features."
+    },
+    team: {
+      label: "Team Meeting",
+      context: "Internal team meeting. Help me contribute constructively, suggest solutions, take ownership of action items, and keep discussions focused and productive."
+    },
+    "1on1": {
+      label: "1:1",
+      context: "One-on-one meeting. Help me listen actively, ask thoughtful follow-up questions, provide supportive feedback, and ensure both parties feel heard."
+    },
+    custom: {
+      label: "Custom",
+      context: ""
+    }
+  };
+
+  const handleMeetingTypeChange = (type: string) => {
+    setMeetingType(type);
+    const preset = meetingPresets[type];
+    if (preset && preset.context) {
+      setContextInput(preset.context);
+      // Auto-save the preset context
+      invoke("set_meeting_context", { context: preset.context }).then(() => {
+        setMeetingContext(preset.context);
+      });
+    }
+  };
+
   const [recordingTime, setRecordingTime] = useState(0);
 
   useEffect(() => {
@@ -412,371 +506,372 @@ function App() {
   }, [isLiveTranscribing, isRecordingOnly]);
 
   return (
-    <div className="app">
-      {/* Left Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <span className="logo-icon">🎙️</span>
-          <span className="logo-text">MeetBetter</span>
-        </div>
+    <div className={`app-minimal ${appState}`}>
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="settings-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Settings</h2>
+              <button className="close-btn" onClick={() => setShowSettings(false)}>×</button>
+            </div>
 
-        <div className="sidebar-content">
-          {/* API Key */}
-          <div className="setting-group">
-            <label className="setting-label">API Key</label>
-            {hasGroqKey && !isEditingApiKey ? (
-              <div className="api-connected">
-                <span className="dot"></span>
-                <span>Connected</span>
-                <button
-                  className="edit-key-btn"
-                  onClick={() => setIsEditingApiKey(true)}
-                  title="Change API key"
-                >
-                  Edit
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="api-input">
-                  <input
-                    type="password"
-                    placeholder="Enter Groq API key"
-                    value={groqKeyInput}
-                    onChange={(e) => setGroqKeyInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
-                  />
-                  <button onClick={handleSaveApiKey} disabled={isLoading || !groqKeyInput.trim()}>
-                    Save
-                  </button>
-                </div>
-                {isEditingApiKey && (
-                  <button
-                    className="cancel-edit-btn"
-                    onClick={() => {
-                      setIsEditingApiKey(false);
-                      setGroqKeyInput("");
-                    }}
-                  >
-                    Cancel
-                  </button>
+            <div className="modal-content">
+              {/* Groq API Key */}
+              <div className="setting-item">
+                <label>Groq API Key</label>
+                <p className="setting-hint">Powers AI suggestions and batch transcription</p>
+                {hasGroqKey && !isEditingApiKey ? (
+                  <div className="api-status">
+                    <span className="status-dot connected"></span>
+                    <span>Connected</span>
+                    <button className="text-btn" onClick={() => setIsEditingApiKey(true)}>Change</button>
+                  </div>
+                ) : (
+                  <div className="api-input-row">
+                    <input
+                      type="password"
+                      placeholder="Enter Groq API key"
+                      value={groqKeyInput}
+                      onChange={(e) => setGroqKeyInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveGroqKey()}
+                    />
+                    <button onClick={handleSaveGroqKey} disabled={isLoading || !groqKeyInput.trim()}>
+                      Save
+                    </button>
+                  </div>
                 )}
-                <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="link">
-                  Get free key
-                </a>
-              </>
-            )}
-          </div>
-
-          {/* Auto Replies Toggle */}
-          <div className="setting-group">
-            <label className="setting-label">Live Features</label>
-            <label className="toggle-row">
-              <span>Auto-suggest replies</span>
-              <div className="toggle">
-                <input
-                  type="checkbox"
-                  checked={autoGenerateReplies}
-                  onChange={(e) => setAutoGenerateReplies(e.target.checked)}
-                />
-                <span className="toggle-track"></span>
+                <span className="help-link" onClick={() => openUrl("https://console.groq.com/keys")}>
+                  Get free Groq key →
+                </span>
               </div>
-            </label>
-          </div>
 
-          {/* Meeting Context */}
-          <div className="setting-group">
-            <label className="setting-label">Meeting Context</label>
-            <p className="setting-hint">Help AI suggest better replies</p>
-            <textarea
-              className="context-input"
-              placeholder="e.g., Sales call with enterprise client, discussing pricing. I'm the account manager."
-              value={contextInput}
-              onChange={(e) => setContextInput(e.target.value)}
-              onBlur={handleSaveContext}
-              rows={3}
-            />
-            {meetingContext && contextInput === meetingContext && (
-              <span className="context-saved">Saved</span>
-            )}
-          </div>
+              {/* Deepgram API Key */}
+              <div className="setting-item">
+                <label>Deepgram API Key</label>
+                <p className="setting-hint">Enables real-time streaming transcription</p>
+                {hasDeepgramKey && !isEditingDeepgramKey ? (
+                  <div className="api-status">
+                    <span className="status-dot connected"></span>
+                    <span>Connected</span>
+                    <button className="text-btn" onClick={() => setIsEditingDeepgramKey(true)}>Change</button>
+                  </div>
+                ) : (
+                  <div className="api-input-row">
+                    <input
+                      type="password"
+                      placeholder="Enter Deepgram API key"
+                      value={deepgramKeyInput}
+                      onChange={(e) => setDeepgramKeyInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveDeepgramKey()}
+                    />
+                    <button onClick={handleSaveDeepgramKey} disabled={isLoading || !deepgramKeyInput.trim()}>
+                      Save
+                    </button>
+                  </div>
+                )}
+                <span className="help-link" onClick={() => openUrl("https://console.deepgram.com/")}>
+                  Get Deepgram key →
+                </span>
+              </div>
 
-          {/* Privacy */}
-          {screenShareSupported && (
-            <div className="setting-group">
-              <label className="setting-label">Privacy</label>
-              <label className="toggle-row">
-                <span>Hide from screen share</span>
+              {/* Auto-suggest */}
+              <div className="setting-item">
+                <label>Auto-suggest replies</label>
                 <div className="toggle">
                   <input
                     type="checkbox"
-                    checked={hideFromScreenShare}
-                    onChange={(e) => handleToggleScreenShare(e.target.checked)}
+                    checked={autoGenerateReplies}
+                    onChange={(e) => setAutoGenerateReplies(e.target.checked)}
                   />
                   <span className="toggle-track"></span>
                 </div>
-              </label>
+              </div>
+
+              {/* Privacy */}
+              {screenShareSupported && (
+                <div className="setting-item">
+                  <label>Hide from screen share</label>
+                  <div className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={hideFromScreenShare}
+                      onChange={(e) => handleToggleScreenShare(e.target.checked)}
+                    />
+                    <span className="toggle-track"></span>
+                  </div>
+                </div>
+              )}
+
+              {/* Dev Mode in Settings */}
+              {import.meta.env.DEV && (
+                <div className="setting-item">
+                  <label>Mock Test</label>
+                  <button
+                    className={`text-btn dev-link ${isMockTranscribing ? 'active' : ''}`}
+                    onClick={() => {
+                      handleMockTranscription();
+                      setShowSettings(false);
+                    }}
+                  >
+                    {isMockTranscribing ? "Stop" : "Run"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* READY STATE - Clean centered start screen */}
+      {appState === 'ready' && (
+        <div className="ready-screen">
+          <header className="minimal-header">
+            <span className="logo">MeetBetter</span>
+            <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">
+              ⚙️
+            </button>
+          </header>
+
+          <main className="ready-content">
+            {!(hasGroqKey || hasDeepgramKey) ? (
+              <div className="setup-prompt">
+                <h1>Welcome to MeetBetter</h1>
+                <p>Add your API keys to get started</p>
+                <button className="primary-btn large" onClick={() => setShowSettings(true)}>
+                  Open Settings
+                </button>
+              </div>
+            ) : (
+              <div className="start-section">
+                <h1>What kind of meeting?</h1>
+                <div className="meeting-types">
+                  {Object.entries(meetingPresets).map(([key, preset]) => (
+                    <button
+                      key={key}
+                      className={`type-btn ${meetingType === key ? 'active' : ''}`}
+                      onClick={() => handleMeetingTypeChange(key)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
+                {meetingType === 'custom' && (
+                  <textarea
+                    className="context-textarea"
+                    placeholder="Describe the meeting context..."
+                    value={contextInput}
+                    onChange={(e) => setContextInput(e.target.value)}
+                    onBlur={handleSaveContext}
+                    rows={2}
+                  />
+                )}
+
+                <button
+                  className="primary-btn large start-btn"
+                  onClick={handleStartLiveTranscription}
+                >
+                  Start Meeting
+                </button>
+              </div>
+            )}
+          </main>
+        </div>
+      )}
+
+      {/* RECORDING STATE - Full-screen transcript with floating suggestions */}
+      {appState === 'recording' && (
+        <div className="recording-screen">
+          {/* Minimal header during recording */}
+          <header className="recording-header">
+            <div className="recording-status">
+              <span className="rec-dot"></span>
+              <span className="rec-time">{formatTime(recordingTime)}</span>
+              <div className="audio-waveform">
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+                <span className="bar"></span>
+              </div>
+            </div>
+            <button className="stop-btn" onClick={() => {
+              if (isLiveTranscribing) {
+                handleStopLiveTranscription();
+              } else if (isMockTranscribing) {
+                handleMockTranscription();
+              } else if (isRecordingOnly) {
+                handleStopRecordingOnly();
+              }
+            }}>
+              Stop
+            </button>
+          </header>
+
+          {/* Transcript Area - Takes most of the screen */}
+          <main className="transcript-main">
+            {transcription.length === 0 ? (
+              <div className="empty-transcript">
+                <p>Listening...</p>
+              </div>
+            ) : (
+              <div className="transcript-list chat-style">
+                {transcription.map((seg, i) => (
+                  <div
+                    key={i}
+                    className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'} ${seg.is_final === false ? 'interim' : ''}`}
+                  >
+                    <div className="message-bubble">
+                      <span className="speaker-label">{seg.speaker}</span>
+                      <p>{seg.text}</p>
+                      {seg.is_final === false && <span className="interim-badge">...</span>}
+                    </div>
+                  </div>
+                ))}
+                <div ref={transcriptionEndRef} />
+              </div>
+            )}
+          </main>
+
+          {/* Floating Suggestions at Bottom */}
+          {suggestedReplies.length > 0 && (() => {
+            const parseSuggestion = (s: string) => {
+              const isRecommended = s.startsWith('★');
+              const cleaned = s.replace(/^★\s*/, '');
+              const match = cleaned.match(/^(PROBE|INSIGHT|MIRROR|REFRAME|CLARIFY|LABEL):\s*(.+)$/i);
+              if (match) {
+                return { type: match[1].toUpperCase(), text: match[2], isRecommended, raw: s };
+              }
+              return { type: 'OTHER', text: cleaned, isRecommended, raw: s };
+            };
+
+            const parsed = suggestedReplies.map(parseSuggestion);
+            const recommended = parsed.find(p => p.isRecommended);
+            const others = parsed.filter(p => !p.isRecommended);
+
+            return (
+              <div className="floating-suggestions">
+                {recommended && (
+                  <button
+                    className={`suggestion-chip recommended ${copiedIndex === suggestedReplies.indexOf(recommended.raw) ? 'copied' : ''}`}
+                    onClick={() => handleCopyReply(recommended.raw, suggestedReplies.indexOf(recommended.raw))}
+                  >
+                    <span className="chip-label">★</span>
+                    <span className="chip-text">{recommended.text}</span>
+                  </button>
+                )}
+                {others.slice(0, 3).map((item, i) => (
+                  <button
+                    key={i}
+                    className={`suggestion-chip ${copiedIndex === suggestedReplies.indexOf(item.raw) ? 'copied' : ''}`}
+                    onClick={() => handleCopyReply(item.raw, suggestedReplies.indexOf(item.raw))}
+                  >
+                    <span className="chip-label">{item.type}</span>
+                    <span className="chip-text">{item.text}</span>
+                  </button>
+                ))}
+                {isGeneratingReplies && <span className="generating-indicator">...</span>}
+              </div>
+            );
+          })()}
+
+          {replyError && (
+            <div className="error-toast">
+              {replyError}
             </div>
           )}
+        </div>
+      )}
 
-          {/* Quick Actions - show when has transcript */}
-          {transcription.length > 0 && (
-            <div className="setting-group">
-              <label className="setting-label">Actions</label>
-              <div className="quick-actions">
+      {/* DONE STATE - Summary view */}
+      {appState === 'done' && (
+        <div className="done-screen">
+          <header className="minimal-header">
+            <span className="logo">MeetBetter</span>
+            <div className="header-actions">
+              <button className="text-btn" onClick={handleClearAll}>New Meeting</button>
+              <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
+            </div>
+          </header>
+
+          <main className="done-content">
+            {/* Summary Section */}
+            <section className="summary-section-main">
+              <div className="section-title">
+                <h2>Meeting Summary</h2>
                 <button
-                  className="action-btn primary"
+                  className="generate-btn"
                   onClick={handleGenerateSummary}
                   disabled={isGeneratingSummary}
                 >
-                  {isGeneratingSummary ? "Generating..." : "Generate Summary"}
-                </button>
-                <button
-                  className="action-btn"
-                  onClick={handleGenerateReplies}
-                  disabled={isGeneratingReplies}
-                >
-                  {isGeneratingReplies ? "Generating..." : "Suggest Replies"}
-                </button>
-                <button
-                  className="action-btn danger"
-                  onClick={handleClearAll}
-                  disabled={isLiveTranscribing}
-                >
-                  Clear All
+                  {isGeneratingSummary ? "Generating..." : structuredSummary ? "Refresh" : "Generate"}
                 </button>
               </div>
-            </div>
-          )}
 
-          {/* Saved Recording - show after meeting ends */}
-          {savedRecordingPath && !isLiveTranscribing && (
-            <div className="setting-group">
-              <label className="setting-label">Saved Recording</label>
-              <div className="recording-info">
-                <span className="recording-path" title={savedRecordingPath}>
-                  {savedRecordingPath.split('/').pop()}
-                </span>
-                <button
-                  className="action-btn small"
-                  onClick={handleTranscribeFromRecording}
-                  disabled={isTranscribingRecording}
-                >
-                  {isTranscribingRecording ? "Transcribing..." : "Re-transcribe"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Dev Mode: Mock Transcription - only visible in development */}
-          {import.meta.env.DEV && (
-            <div className="setting-group" style={{ marginTop: 'auto', borderTop: '1px solid #333', paddingTop: '12px' }}>
-              <label className="setting-label" style={{ color: '#f59e0b' }}>Dev Mode</label>
-              <button
-                className="action-btn"
-                onClick={handleMockTranscription}
-                style={{
-                  backgroundColor: isMockTranscribing ? '#dc2626' : '#7c3aed',
-                  width: '100%'
-                }}
-              >
-                {isMockTranscribing ? "Stop Mock" : "Run Mock Test"}
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="main">
-        {/* Status Bar */}
-        <div className="status-bar">
-          {isLiveTranscribing ? (
-            <>
-              <span className="rec-dot"></span>
-              <span>Live Transcribing {formatTime(recordingTime)}</span>
-              {isGeneratingReplies && <span className="generating-badge">Generating replies...</span>}
-            </>
-          ) : isRecordingOnly ? (
-            <>
-              <span className="rec-dot recording-only"></span>
-              <span>Recording Only {formatTime(recordingTime)}</span>
-            </>
-          ) : hasGroqKey ? (
-            transcription.length > 0 ? `${transcription.length} segments recorded` : "Ready"
-          ) : (
-            "Add API key for live transcription"
-          )}
-        </div>
-
-        {/* Content Area */}
-        <div className="content-wrapper">
-          {/* Transcript Panel */}
-          <div className="transcript-panel">
-            <div className="panel-header">
-              <h2>{isRecordingOnly ? "Recording" : "Live Transcription"}</h2>
-              {isLiveTranscribing && (
-                <span className="live-indicator">LIVE</span>
-              )}
-              {isRecordingOnly && (
-                <span className="recording-indicator">REC</span>
-              )}
-            </div>
-            <div className="transcript-area">
-              {transcription.length === 0 ? (
-                <div className="empty">
-                  <div className="empty-icon">🎤</div>
-                  {isRecordingOnly ? (
-                    <>
-                      <p>Recording in progress...</p>
-                      <p className="empty-sub">Audio is being saved. Transcribe after recording stops.</p>
-                    </>
-                  ) : (
-                    <>
-                      <p>Choose how to start</p>
-                      <p className="empty-sub">
-                        <strong>Live Transcription:</strong> Real-time text as you speak<br />
-                        <strong>Record Only:</strong> Save audio and transcribe later
-                      </p>
-                    </>
+              {isGeneratingSummary ? (
+                <div className="generating-state">Analyzing your meeting...</div>
+              ) : structuredSummary ? (
+                <div className="summary-content">
+                  {structuredSummary.key_points?.length > 0 && (
+                    <div className="summary-group">
+                      <h3>Key Points</h3>
+                      <ul>
+                        {structuredSummary.key_points.map((p, i) => <li key={i}>{p}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {structuredSummary.action_items?.length > 0 && (
+                    <div className="summary-group actions">
+                      <h3>Action Items</h3>
+                      <ul>
+                        {structuredSummary.action_items.map((p, i) => <li key={i}>{p}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {structuredSummary.decisions?.length > 0 && (
+                    <div className="summary-group">
+                      <h3>Decisions</h3>
+                      <ul>
+                        {structuredSummary.decisions.map((p, i) => <li key={i}>{p}</li>)}
+                      </ul>
+                    </div>
                   )}
                 </div>
               ) : (
-                <div className="transcript-list">
+                <div className="empty-summary">
+                  <p>Click "Generate" to create a meeting summary</p>
+                </div>
+              )}
+            </section>
+
+            {/* Collapsible Transcript */}
+            <section className="transcript-section">
+              <details>
+                <summary>
+                  <h3>Full Transcript ({transcription.length} segments)</h3>
+                </summary>
+                <div className="transcript-list compact">
                   {transcription.map((seg, i) => (
-                    <div
-                      key={i}
-                      className={`transcript-item ${seg.is_final === false ? 'interim' : ''}`}
-                    >
-                      <span className="time">{seg.timestamp}</span>
-                      <p>{seg.text}</p>
-                      {seg.is_final === false && (
-                        <span className="interim-badge">typing...</span>
-                      )}
-                    </div>
-                  ))}
-                  <div ref={transcriptionEndRef} />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Panel - Always visible when there's content */}
-          <div className="right-panel">
-            {/* Suggested Replies - Show during and after recording */}
-            <div className="panel-section">
-              <div className="section-header">
-                <h3>Suggested Replies</h3>
-                {isGeneratingReplies && <span className="loading-dot"></span>}
-              </div>
-              {replyError && (
-                <div className="reply-error">
-                  <span className="error-icon">⚠️</span>
-                  <span>{replyError}</span>
-                </div>
-              )}
-              {suggestedReplies.length > 0 ? (
-                <div className="replies-list">
-                  {suggestedReplies.map((reply, i) => (
-                    <div key={i} className="reply-item" onClick={() => handleCopyReply(reply, i)}>
-                      <p>{reply}</p>
-                      <span className="copy-hint">
-                        {copiedIndex === i ? "Copied!" : "Click to copy"}
-                      </span>
+                    <div key={i} className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'}`}>
+                      <span className="speaker">{seg.speaker}:</span>
+                      <span className="text">{seg.text}</span>
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div className="empty-replies">
-                  <p>{isLiveTranscribing ? "Replies will appear as you talk..." : "Start recording to get suggestions"}</p>
-                </div>
-              )}
-            </div>
+              </details>
+            </section>
 
-            {/* Summary Section - Always show when not recording and has transcript */}
-            {!isLiveTranscribing && transcription.length > 0 && (
-              <div className="panel-section">
-                <div className="section-header">
-                  <h3>Meeting Summary</h3>
-                  <button
-                    className="generate-btn"
-                    onClick={handleGenerateSummary}
-                    disabled={isGeneratingSummary}
-                  >
-                    {isGeneratingSummary ? "..." : structuredSummary || summary ? "Refresh" : "Generate"}
-                  </button>
-                </div>
-                {isGeneratingSummary ? (
-                  <div className="generating">Generating summary...</div>
-                ) : structuredSummary || summary ? (
-                  <>
-                    {structuredSummary?.key_points?.length ? (
-                      <div className="summary-section">
-                        <h4>Key Points</h4>
-                        <ul>
-                          {structuredSummary.key_points.map((p, i) => <li key={i}>{p}</li>)}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {structuredSummary?.action_items?.length ? (
-                      <div className="summary-section actions">
-                        <h4>Action Items</h4>
-                        <ul>
-                          {structuredSummary.action_items.map((p, i) => <li key={i}>{p}</li>)}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {structuredSummary?.decisions?.length ? (
-                      <div className="summary-section">
-                        <h4>Decisions</h4>
-                        <ul>
-                          {structuredSummary.decisions.map((p, i) => <li key={i}>{p}</li>)}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {!structuredSummary?.key_points?.length && !structuredSummary?.action_items?.length && summary && (
-                      <p className="summary-text">{summary}</p>
-                    )}
-                  </>
-                ) : (
-                  <div className="no-summary">Click "Generate" to create a summary</div>
-                )}
-              </div>
+            {/* Saved Recording */}
+            {savedRecordingPath && (
+              <section className="recording-section">
+                <p className="recording-path">
+                  Recording saved: {savedRecordingPath.split('/').pop()}
+                </p>
+              </section>
             )}
-          </div>
+          </main>
         </div>
-
-        {/* Controls */}
-        <div className="controls">
-          {!isLiveTranscribing && !isRecordingOnly ? (
-            <>
-              <button
-                className="btn-record"
-                onClick={handleStartLiveTranscription}
-                disabled={!hasGroqKey}
-                title={!hasGroqKey ? "Add API key first" : "Start with live transcription"}
-              >
-                Live Transcription
-              </button>
-              <button
-                className="btn-record-only"
-                onClick={handleStartRecordingOnly}
-                title="Record audio only, transcribe later"
-              >
-                Record Only
-              </button>
-            </>
-          ) : isLiveTranscribing ? (
-            <button className="btn-stop" onClick={handleStopLiveTranscription}>
-              Stop Transcription
-            </button>
-          ) : (
-            <button className="btn-stop" onClick={handleStopRecordingOnly}>
-              Stop Recording
-            </button>
-          )}
-        </div>
-      </main>
+      )}
     </div>
   );
 }
