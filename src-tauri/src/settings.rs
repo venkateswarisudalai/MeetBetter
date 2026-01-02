@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 /// Environment variable names for API keys
 /// These take priority over settings file
-pub const ENV_GROQ_API_KEY: &str = "MEETBETTER_GROQ_API_KEY";
-pub const ENV_DEEPGRAM_API_KEY: &str = "MEETBETTER_DEEPGRAM_API_KEY";
-pub const ENV_ASSEMBLYAI_API_KEY: &str = "MEETBETTER_ASSEMBLYAI_API_KEY";
+pub const ENV_GROQ_API_KEY: &str = "VANTAGE_GROQ_API_KEY";
+pub const ENV_DEEPGRAM_API_KEY: &str = "VANTAGE_DEEPGRAM_API_KEY";
+pub const ENV_ASSEMBLYAI_API_KEY: &str = "VANTAGE_ASSEMBLYAI_API_KEY";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
@@ -28,7 +28,7 @@ impl AppSettings {
     /// Get the path to the settings file
     fn get_settings_path() -> Option<PathBuf> {
         dirs::config_dir().map(|mut path| {
-            path.push("meetbetter");
+            path.push("vantage");
             path.push("settings.json");
             path
         })

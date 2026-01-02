@@ -2255,34 +2255,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2532096657941c2fea9c289d370a250971c689d4f143798ff67113ec042024a5"
 
 [[package]]
-name = "meetbetter"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "chrono",
- "cocoa",
- "cpal",
- "dirs 5.0.1",
- "dotenvy",
- "futures-util",
- "hound",
- "objc",
- "parking_lot",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "tokio-tungstenite",
- "url",
- "urlencoding",
- "windows 0.58.0",
-]
-
-[[package]]
 name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4985,6 +4957,34 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "vantage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "chrono",
+ "cocoa",
+ "cpal",
+ "dirs 5.0.1",
+ "dotenvy",
+ "futures-util",
+ "hound",
+ "objc",
+ "parking_lot",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "tokio-tungstenite",
+ "url",
+ "urlencoding",
+ "windows 0.58.0",
 ]
 
 [[package]]

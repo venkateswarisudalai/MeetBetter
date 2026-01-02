@@ -11,5 +11,5 @@ fn main() {
         eprintln!("Loaded environment variables from .env file");
     }
 
-    meetbetter_lib::run()
+    vantage_lib::run()
 }

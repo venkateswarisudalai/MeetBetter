@@ -9,14 +9,14 @@
 use std::sync::{Arc, Mutex};
 
 // Re-use the library code
-use meetbetter_lib::groq;
+use vantage_lib::groq;
 
 const TEST_AUDIO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test_audio");
-const ENV_GROQ_API_KEY: &str = "MEETBETTER_GROQ_API_KEY";
+const ENV_GROQ_API_KEY: &str = "VANTAGE_GROQ_API_KEY";
 
 #[tokio::main]
 async fn main() {
-    println!("=== MeetBetter Mock Integration Test ===\n");
+    println!("=== Vantage Mock Integration Test ===\n");
 
     // Load .env file if it exists
     let _ = dotenvy::dotenv();
@@ -27,7 +27,7 @@ async fn main() {
         .filter(|k| !k.is_empty())
         .or_else(|| {
             // Fallback to settings file
-            let settings_path = dirs::config_dir()?.join("meetbetter").join("settings.json");
+            let settings_path = dirs::config_dir()?.join("vantage").join("settings.json");
             if settings_path.exists() {
                 let content = std::fs::read_to_string(&settings_path).ok()?;
                 let json: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -40,7 +40,7 @@ async fn main() {
 
     if api_key.is_empty() {
         eprintln!("ERROR: No Groq API key found.");
-        eprintln!("Set MEETBETTER_GROQ_API_KEY environment variable or add key in app settings.");
+        eprintln!("Set VANTAGE_GROQ_API_KEY environment variable or add key in app settings.");
         std::process::exit(1);
     }
 

@@ -1,8 +1,8 @@
 {
-  "name": "meetbetter",
+  "name": "vantage",
   "private": false,
   "version": "0.1.0",
-  "description": "Privacy-focused desktop app for real-time meeting transcription with AI-powered summaries",
+  "description": "Privacy-focused desktop app for real-time meeting transcription with AI-powered suggestions",
   "author": "Venkateswari",
   "license": "MIT",
   "repository": {
