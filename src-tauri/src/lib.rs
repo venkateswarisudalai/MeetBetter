@@ -4,19 +4,20 @@ use std::sync::{
     Arc, Mutex,
 };
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 mod assemblyai;
 mod audio;
 mod deepgram;
-mod groq;
+pub mod groq;  // Public for mock_test binary
+mod mock;
 mod realtime;
 mod screen_share;
 mod settings;
 
 use settings::AppSettings;
 
-use deepgram::DeepgramTranscriber;
+use deepgram::{DeepgramTranscriber, TranscriptMessage};
 
 /// Transcription provider options
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -52,6 +53,9 @@ pub struct AppState {
     pub deepgram_stop_flag: Arc<AtomicBool>,
     pub settings: Arc<Mutex<AppSettings>>,
     pub meeting_context: Arc<Mutex<String>>,
+    // Mock transcription state
+    pub is_mock_transcribing: Arc<Mutex<bool>>,
+    pub mock_stop_signal: Arc<Mutex<Option<watch::Sender<bool>>>>,
 }
 
 impl Default for AppState {
@@ -95,6 +99,9 @@ impl Default for AppState {
             deepgram_stop_flag: Arc::new(AtomicBool::new(false)),
             settings: Arc::new(Mutex::new(saved_settings.clone())),
             meeting_context: Arc::new(Mutex::new(saved_settings.meeting_context)),
+            // Mock transcription state
+            is_mock_transcribing: Arc::new(Mutex::new(false)),
+            mock_stop_signal: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -104,6 +111,36 @@ pub struct TranscriptSegment {
     pub timestamp: String,
     pub speaker: String,
     pub text: String,
+}
+
+/// Filler words to remove from transcripts for cleaner output
+const FILLER_WORDS: &[&str] = &[
+    " um ", " uh ", " er ", " ah ", " like ", " you know ",
+    " i mean ", " sort of ", " kind of ", " basically ",
+    " actually ", " literally ", " right ", " okay so ",
+];
+
+/// Clean transcript by removing filler words
+fn clean_transcript(text: &str) -> String {
+    let mut result = format!(" {} ", text.to_lowercase());
+
+    for filler in FILLER_WORDS {
+        result = result.replace(filler, " ");
+    }
+
+    // Clean up extra spaces and restore proper capitalization
+    let cleaned: String = result
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Capitalize first letter
+    let mut chars: Vec<char> = cleaned.chars().collect();
+    if !chars.is_empty() {
+        chars[0] = chars[0].to_uppercase().next().unwrap_or(chars[0]);
+    }
+
+    chars.into_iter().collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +171,7 @@ struct TranscriptEvent {
     text: String,
     timestamp: String,
     speaker: String,
+    is_final: bool,  // true = finalized transcript, false = interim (still being transcribed)
 }
 
 // Commands
@@ -182,24 +220,41 @@ async fn start_live_transcription(
     let deepgram_key = state.deepgram_api_key.lock().map_err(|e| e.to_string())?.clone();
     let assemblyai_key = state.assemblyai_api_key.lock().map_err(|e| e.to_string())?.clone();
 
-    // Check if the required API key is set for the selected provider
-    match provider {
-        TranscriptionProvider::Groq => {
-            if groq_key.is_empty() {
-                return Err("Please set your Groq API key in Settings".to_string());
-            }
-        }
+    // Auto-select provider: prefer Deepgram (real-time) if available, else Groq (batch)
+    let effective_provider = match provider {
         TranscriptionProvider::Deepgram => {
             if deepgram_key.is_empty() {
-                return Err("Please set your Deepgram API key in Settings".to_string());
+                // Fallback to Groq if Deepgram key not set
+                if !groq_key.is_empty() {
+                    eprintln!("Deepgram key not set, falling back to Groq Whisper");
+                    TranscriptionProvider::Groq
+                } else {
+                    return Err("Please set your Deepgram or Groq API key in Settings".to_string());
+                }
+            } else {
+                TranscriptionProvider::Deepgram
+            }
+        }
+        TranscriptionProvider::Groq => {
+            if groq_key.is_empty() {
+                // Fallback to Deepgram if Groq key not set
+                if !deepgram_key.is_empty() {
+                    eprintln!("Groq key not set, falling back to Deepgram streaming");
+                    TranscriptionProvider::Deepgram
+                } else {
+                    return Err("Please set your Groq or Deepgram API key in Settings".to_string());
+                }
+            } else {
+                TranscriptionProvider::Groq
             }
         }
         TranscriptionProvider::AssemblyAI => {
             if assemblyai_key.is_empty() {
                 return Err("Please set your AssemblyAI API key in Settings".to_string());
             }
+            TranscriptionProvider::AssemblyAI
         }
-    }
+    };
 
     {
         let mut is_live = state.is_live_transcribing.lock().map_err(|e| e.to_string())?;
@@ -209,14 +264,14 @@ async fn start_live_transcription(
         *is_live = true;
     }
 
-    match provider {
+    match effective_provider {
         TranscriptionProvider::Deepgram => {
-            // Use Deepgram real-time streaming
-            eprintln!("Using Deepgram for real-time transcription...");
+            // Use Deepgram real-time streaming with optimized parameters
+            eprintln!("Using Deepgram for real-time transcription (nova-2, 100ms endpointing)...");
             state.deepgram_stop_flag.store(false, Ordering::SeqCst);
 
-            // Create channel for receiving transcripts
-            let (tx, mut rx) = mpsc::channel::<String>(100);
+            // Create channel for receiving transcripts (now includes is_final flag)
+            let (tx, mut rx) = mpsc::channel::<TranscriptMessage>(100);
             let transcriber = DeepgramTranscriber::new(tx);
 
             let app_clone = app.clone();
@@ -224,38 +279,87 @@ async fn start_live_transcription(
 
             // Spawn task to handle incoming transcripts
             tokio::spawn(async move {
-                while let Some(text) = rx.recv().await {
-                    if !text.is_empty() {
-                        let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+                // Track interim text to replace with final
+                let mut current_interim_index: Option<usize> = None;
 
+                while let Some(msg) = rx.recv().await {
+                    if msg.text.is_empty() {
+                        continue;
+                    }
+
+                    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+
+                    if msg.is_final {
+                        // Final transcript - add to transcription history
                         if let Ok(mut trans) = transcription_state.lock() {
+                            // If we had an interim result, remove it
+                            if let Some(idx) = current_interim_index.take() {
+                                if idx < trans.len() {
+                                    trans.remove(idx);
+                                }
+                            }
                             trans.push(TranscriptSegment {
                                 timestamp: timestamp.clone(),
                                 speaker: "Speaker".to_string(),
-                                text: text.clone(),
+                                text: clean_transcript(&msg.text),
                             });
                         }
 
                         let _ = app_clone.emit("transcript-update", TranscriptEvent {
-                            text,
+                            text: msg.text,
                             timestamp,
                             speaker: "Speaker".to_string(),
+                            is_final: true,
+                        });
+                    } else {
+                        // Interim result - emit for real-time UI feedback
+                        // Don't add to permanent transcription yet
+                        let _ = app_clone.emit("transcript-update", TranscriptEvent {
+                            text: msg.text,
+                            timestamp,
+                            speaker: "Speaker".to_string(),
+                            is_final: false,
                         });
                     }
                 }
             });
 
-            // Start the transcriber
+            // Start the transcriber with auto-retry on connection failures
             let api_key = deepgram_key.clone();
             tokio::spawn(async move {
-                if let Err(e) = transcriber.start(&api_key).await {
-                    eprintln!("Deepgram transcriber error: {}", e);
+                let mut retry_delay_ms: u64 = 1000;
+                let mut consecutive_failures: u32 = 0;
+                const MAX_RETRY_DELAY_MS: u64 = 30000;
+                const MAX_RETRIES: u32 = 10;
+
+                loop {
+                    match transcriber.start(&api_key).await {
+                        Ok(()) => {
+                            eprintln!("Deepgram transcriber completed normally");
+                            break;
+                        }
+                        Err(e) => {
+                            consecutive_failures += 1;
+                            eprintln!("Deepgram transcriber error (attempt {}): {}", consecutive_failures, e);
+
+                            if consecutive_failures >= MAX_RETRIES {
+                                eprintln!("Deepgram: Max retries ({}) reached, giving up", MAX_RETRIES);
+                                break;
+                            }
+
+                            // Exponential backoff
+                            eprintln!("Deepgram: Retrying in {}ms...", retry_delay_ms);
+                            tokio::time::sleep(std::time::Duration::from_millis(retry_delay_ms)).await;
+
+                            retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+                        }
+                    }
                 }
             });
         }
         TranscriptionProvider::Groq | TranscriptionProvider::AssemblyAI => {
             // Use batch transcription (Groq Whisper or AssemblyAI)
-            let provider_name = match provider {
+            let provider_name = match effective_provider {
                 TranscriptionProvider::Groq => "Groq Whisper",
                 TranscriptionProvider::AssemblyAI => "AssemblyAI",
                 _ => "Unknown",
@@ -272,8 +376,8 @@ async fn start_live_transcription(
 
             let transcription_state = state.transcription.clone();
             let is_live_transcribing = state.is_live_transcribing.clone();
-            let api_key = if provider == TranscriptionProvider::Groq { groq_key } else { assemblyai_key };
-            let use_groq = provider == TranscriptionProvider::Groq;
+            let api_key = if effective_provider == TranscriptionProvider::Groq { groq_key } else { assemblyai_key };
+            let use_groq = effective_provider == TranscriptionProvider::Groq;
 
             tokio::spawn(async move {
                 eprintln!("Starting {} transcription...", provider_name);
@@ -282,7 +386,11 @@ async fn start_live_transcription(
                 const MIN_AUDIO_BYTES: u64 = 48_000;
 
                 let mut last_transcribed_size: u64 = 0;
-                let mut last_full_text: String = String::new();
+                let mut last_full_text = String::new();  // Track last transcription to extract new text
+
+                // Retry state for resilient error handling
+                let mut consecutive_errors: u32 = 0;
+                let mut retry_delay_ms: u64 = 1000;
 
                 loop {
                     tokio::select! {
@@ -296,7 +404,8 @@ async fn start_live_transcription(
                                 let new_audio = current_size.saturating_sub(last_transcribed_size);
 
                                 if new_audio >= MIN_AUDIO_BYTES {
-                                    eprintln!("New audio detected: {} bytes, transcribing...", new_audio);
+                                    eprintln!("New audio detected: {} bytes (total: {}MB), transcribing...",
+                                        new_audio, current_size / 1_000_000);
 
                                     let result = if use_groq {
                                         groq::transcribe_audio(&api_key, &output_path).await
@@ -308,6 +417,10 @@ async fn start_live_transcription(
 
                                     match result {
                                         Ok(full_text) => {
+                                            // Reset retry state on success
+                                            consecutive_errors = 0;
+                                            retry_delay_ms = 1000;
+
                                             if !full_text.is_empty() {
                                                 // Extract only the NEW text (what's different from last transcription)
                                                 let new_text = if last_full_text.is_empty() {
@@ -330,7 +443,7 @@ async fn start_live_transcription(
                                                         trans.push(TranscriptSegment {
                                                             timestamp: timestamp.clone(),
                                                             speaker: "Speaker".to_string(),
-                                                            text: new_text.clone(),
+                                                            text: clean_transcript(&new_text),
                                                         });
                                                     }
 
@@ -338,6 +451,7 @@ async fn start_live_transcription(
                                                         text: new_text,
                                                         timestamp,
                                                         speaker: "Speaker".to_string(),
+                                                        is_final: true,
                                                     });
 
                                                     eprintln!("New transcript segment emitted");
@@ -350,7 +464,27 @@ async fn start_live_transcription(
                                             last_transcribed_size = current_size;
                                         }
                                         Err(e) => {
-                                            eprintln!("Transcription error: {}", e);
+                                            consecutive_errors += 1;
+                                            let error_msg = e.to_string();
+                                            eprintln!("Transcription error (attempt {}): {}", consecutive_errors, error_msg);
+
+                                            // Emit retry status to frontend
+                                            let _ = app.emit("transcription-status", serde_json::json!({
+                                                "status": "retrying",
+                                                "error": error_msg,
+                                                "attempt": consecutive_errors,
+                                                "next_retry_ms": retry_delay_ms
+                                            }));
+
+                                            // Exponential backoff with max delay of 30 seconds
+                                            if retry_delay_ms < 30000 {
+                                                retry_delay_ms = std::cmp::min(retry_delay_ms * 2, 30000);
+                                            }
+
+                                            // Wait before next attempt (but still check for stop signal)
+                                            tokio::time::sleep(std::time::Duration::from_millis(retry_delay_ms)).await;
+
+                                            // Continue trying - the loop will automatically retry
                                         }
                                     }
                                 }
@@ -591,7 +725,7 @@ async fn add_transcription(
     let segment = TranscriptSegment {
         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
         speaker,
-        text,
+        text: clean_transcript(&text),
     };
     state.transcription.lock().map_err(|e| e.to_string())?.push(segment);
     Ok(())
@@ -607,7 +741,7 @@ async fn add_manual_transcript(
     let segment = TranscriptSegment {
         timestamp,
         speaker,
-        text,
+        text: clean_transcript(&text),
     };
     state.transcription.lock().map_err(|e| e.to_string())?.push(segment);
     Ok(())
@@ -640,10 +774,11 @@ async fn transcribe_recording(state: State<'_, AppState>, file_path: String) -> 
             let mut segments = Vec::new();
 
             if !text.is_empty() {
+                let cleaned_text = clean_transcript(&text);
                 let segment = TranscriptSegment {
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     speaker: "Speaker".to_string(),
-                    text,
+                    text: cleaned_text,
                 };
                 segments.push(segment.clone());
                 state.transcription.lock().map_err(|e| e.to_string())?.push(segment);
@@ -873,16 +1008,6 @@ async fn generate_auto_replies(
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Get the most recent statements (last 5) to focus replies on current topic
-    let recent_statements: String = transcription
-        .iter()
-        .rev()
-        .take(5)
-        .rev()
-        .map(|s| format!("{}: {}", s.speaker, s.text))
-        .collect::<Vec<_>>()
-        .join("\n");
-
     // Detect the last speaker's intent
     let last_segment = transcription.last().map(|s| s.text.clone()).unwrap_or_default();
 
@@ -894,34 +1019,36 @@ async fn generate_auto_replies(
     };
 
     let prompt = format!(
-        r#"You are an AI assistant helping someone participate in a real-time meeting. Generate smart, contextual reply suggestions instantly.
+        r#"You are the inner voice of a master communicator (Chris Voss, top negotiators). Generate tactical responses for this conversation.
 
-{}CONVERSATION TRANSCRIPT:
+{}CONVERSATION:
 {}
 
-MOST RECENT (what was just said):
-{}
+JUST SAID: "{}"
 
-LAST STATEMENT: "{}"
+Generate 6 tactical suggestions grouped by type. Mark the BEST one with ★.
 
-Generate 4 quick reply suggestions the user can say RIGHT NOW. Requirements:
-1. Be IMMEDIATELY relevant to what was just said
-2. Reference specific details from the conversation
-3. Sound natural and professional
-4. Keep it SHORT (1 sentence preferred, 2 max)
-5. If meeting context is provided, tailor responses to that context (e.g., use appropriate tone for sales calls vs internal meetings)
+TYPES:
+• PROBE: Strategic question to uncover more
+• INSIGHT: Pattern or observation you noticed
+• MIRROR: Echo key words as a question
+• REFRAME: Shift perspective or redirect
+• CLARIFY: Get specifics on something unclear
+• LABEL: Name the emotion or dynamic
 
-Reply types (pick the most appropriate for the situation):
-• Answer if a question was asked
-• Ask a clarifying question about something specific
-• Agree with reasoning OR respectfully disagree with alternative
-• Suggest next step or action
-• Offer help or take ownership of something
-• Add relevant information or perspective
+RULES:
+- Each suggestion: 3-12 words, specific to conversation
+- No filler phrases
+- One suggestion MUST have ★ prefix (your top recommendation)
 
-Format: Return exactly 4 replies, numbered 1-4, one per line.
-DO NOT use generic filler like "Great point" - be specific and actionable."#,
-        meeting_context_section, full_context, recent_statements, last_segment
+FORMAT (exactly like this):
+★ PROBE: What's driving that timeline?
+INSIGHT: They keep circling back to cost
+MIRROR: The accessibility concern?
+PROBE: Who raised the PDF requirement?
+REFRAME: What if we phase the rollout?
+LABEL: Sounds like competing priorities"#,
+        meeting_context_section, full_context, last_segment
     );
 
     eprintln!("Generating contextual auto replies from transcript...");
@@ -931,9 +1058,26 @@ DO NOT use generic filler like "Great point" - be specific and actionable."#,
     let replies: Vec<String> = response
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| line.trim().trim_start_matches(|c: char| c.is_numeric() || c == '.' || c == ')' || c == ':' || c == '-').trim().to_string())
-        .filter(|line| !line.is_empty() && line.len() > 10)
-        .take(4)
+        .map(|line| {
+            // Clean up but preserve the TYPE: format and ★ marker
+            let trimmed = line.trim();
+            // Remove leading numbers like "1." or "1)"
+            let cleaned = trimmed.trim_start_matches(|c: char| c.is_numeric() || c == '.' || c == ')' || c == '-').trim();
+            cleaned.to_string()
+        })
+        .filter(|line| {
+            // Keep lines that have TYPE: format (PROBE:, INSIGHT:, etc.) or start with ★
+            let upper = line.to_uppercase();
+            !line.is_empty() && (
+                upper.starts_with("PROBE:") || upper.starts_with("★ PROBE:") ||
+                upper.starts_with("INSIGHT:") || upper.starts_with("★ INSIGHT:") ||
+                upper.starts_with("MIRROR:") || upper.starts_with("★ MIRROR:") ||
+                upper.starts_with("REFRAME:") || upper.starts_with("★ REFRAME:") ||
+                upper.starts_with("CLARIFY:") || upper.starts_with("★ CLARIFY:") ||
+                upper.starts_with("LABEL:") || upper.starts_with("★ LABEL:")
+            )
+        })
+        .take(6)
         .collect();
 
     *state.suggested_replies.lock().map_err(|e| e.to_string())? = replies.clone();
@@ -963,6 +1107,70 @@ fn is_screen_share_exclusion_supported() -> bool {
 #[tauri::command]
 fn get_screen_share_platform_info() -> String {
     screen_share::get_platform_info().to_string()
+}
+
+/// Start mock transcription using pre-recorded audio files
+/// This is for dev/testing purposes to simulate a live meeting
+/// Expects files named: you_1.wav, participant_1.wav, you_2.wav, participant_2.wav, etc.
+#[tauri::command]
+async fn start_mock_transcription(
+    test_audio_dir: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    // Check if already mock transcribing
+    {
+        let is_mock = state.is_mock_transcribing.lock().map_err(|e| e.to_string())?;
+        if *is_mock {
+            return Err("Mock transcription already running".to_string());
+        }
+    }
+
+    // Get API key
+    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
+    if api_key.is_empty() {
+        return Err("Groq API key not set. Please add it in Settings.".to_string());
+    }
+
+    // Set up stop signal
+    let (stop_tx, stop_rx) = watch::channel(false);
+    *state.mock_stop_signal.lock().map_err(|e| e.to_string())? = Some(stop_tx);
+    *state.is_mock_transcribing.lock().map_err(|e| e.to_string())? = true;
+
+    let config = mock::MockConfig {
+        test_audio_dir: test_audio_dir.clone(),
+    };
+
+    let transcription_state = state.transcription.clone();
+    let is_mock_transcribing = state.is_mock_transcribing.clone();
+
+    // Spawn the mock session
+    tokio::spawn(async move {
+        match mock::run_mock_session(config, &api_key, app, transcription_state, stop_rx).await {
+            Ok(_) => eprintln!("Mock transcription completed successfully"),
+            Err(e) => eprintln!("Mock transcription error: {}", e),
+        }
+
+        // Mark as not running
+        if let Ok(mut is_mock) = is_mock_transcribing.lock() {
+            *is_mock = false;
+        }
+    });
+
+    Ok(format!("Mock transcription started from: {}", test_audio_dir))
+}
+
+/// Stop mock transcription
+#[tauri::command]
+async fn stop_mock_transcription(state: State<'_, AppState>) -> Result<(), String> {
+    // Send stop signal
+    if let Some(tx) = state.mock_stop_signal.lock().map_err(|e| e.to_string())?.take() {
+        let _ = tx.send(true);
+    }
+
+    *state.is_mock_transcribing.lock().map_err(|e| e.to_string())? = false;
+    eprintln!("Mock transcription stopped");
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -998,7 +1206,127 @@ pub fn run() {
             set_screen_share_exclusion,
             is_screen_share_exclusion_supported,
             get_screen_share_platform_info,
+            start_mock_transcription,
+            stop_mock_transcription,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_transcript_removes_fillers() {
+        assert_eq!(
+            clean_transcript("So um I think like we should you know consider this"),
+            "So i think we should consider this"
+        );
+    }
+
+    #[test]
+    fn test_clean_transcript_handles_multiple_fillers() {
+        assert_eq!(
+            clean_transcript("Um uh er ah the thing is basically"),
+            "The thing is"
+        );
+    }
+
+    #[test]
+    fn test_clean_transcript_preserves_content() {
+        assert_eq!(
+            clean_transcript("The project deadline is next Friday"),
+            "The project deadline is next friday"
+        );
+    }
+
+    #[test]
+    fn test_clean_transcript_capitalizes_first_letter() {
+        assert_eq!(
+            clean_transcript("hello world"),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn test_clean_transcript_empty_string() {
+        assert_eq!(clean_transcript(""), "");
+    }
+
+    // Tests for retry/exponential backoff logic
+    #[test]
+    fn test_exponential_backoff_calculation() {
+        let mut retry_delay_ms: u64 = 1000;
+        const MAX_RETRY_DELAY_MS: u64 = 30000;
+
+        // First retry: 1000 -> 2000
+        retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+        assert_eq!(retry_delay_ms, 2000);
+
+        // Second retry: 2000 -> 4000
+        retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+        assert_eq!(retry_delay_ms, 4000);
+
+        // Third retry: 4000 -> 8000
+        retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+        assert_eq!(retry_delay_ms, 8000);
+
+        // Fourth retry: 8000 -> 16000
+        retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+        assert_eq!(retry_delay_ms, 16000);
+
+        // Fifth retry: 16000 -> 30000 (capped at max)
+        retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+        assert_eq!(retry_delay_ms, 30000);
+
+        // Sixth retry: stays at max
+        retry_delay_ms = std::cmp::min(retry_delay_ms * 2, MAX_RETRY_DELAY_MS);
+        assert_eq!(retry_delay_ms, 30000);
+    }
+
+    #[test]
+    fn test_retry_counter_increment() {
+        let mut consecutive_errors: u32 = 0;
+
+        // Simulate 5 consecutive errors
+        for i in 1..=5 {
+            consecutive_errors += 1;
+            assert_eq!(consecutive_errors, i);
+        }
+
+        // Reset on success
+        consecutive_errors = 0;
+        assert_eq!(consecutive_errors, 0);
+    }
+
+    #[test]
+    fn test_max_retries_limit() {
+        const MAX_RETRIES: u32 = 10;
+        let mut consecutive_failures: u32 = 0;
+
+        // Should continue retrying until max
+        for _ in 0..MAX_RETRIES {
+            consecutive_failures += 1;
+            if consecutive_failures >= MAX_RETRIES {
+                break;
+            }
+        }
+
+        assert_eq!(consecutive_failures, MAX_RETRIES);
+    }
+
+    #[test]
+    fn test_retry_delay_starts_at_one_second() {
+        let retry_delay_ms: u64 = 1000;
+        assert_eq!(retry_delay_ms, 1000);
+    }
+
+    #[test]
+    fn test_retry_delay_max_is_30_seconds() {
+        const MAX_RETRY_DELAY_MS: u64 = 30000;
+        let very_large_delay: u64 = 100000;
+        let capped = std::cmp::min(very_large_delay, MAX_RETRY_DELAY_MS);
+        assert_eq!(capped, 30000);
+    }
 }

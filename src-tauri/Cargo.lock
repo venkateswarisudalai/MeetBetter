@@ -936,6 +936,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4954,6 +4960,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "vantage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "chrono",
+ "cocoa",
+ "cpal",
+ "dirs 5.0.1",
+ "dotenvy",
+ "futures-util",
+ "hound",
+ "objc",
+ "parking_lot",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "tokio-tungstenite",
+ "url",
+ "urlencoding",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5822,33 +5856,6 @@ checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
 dependencies = [
  "cfg-if",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "wiselymeet"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "chrono",
- "cocoa",
- "cpal",
- "dirs 5.0.1",
- "futures-util",
- "hound",
- "objc",
- "parking_lot",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "tokio-tungstenite",
- "url",
- "urlencoding",
- "windows 0.58.0",
 ]
 
 [[package]]
