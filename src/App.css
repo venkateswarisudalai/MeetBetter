@@ -664,6 +664,11 @@ body {
   margin: 0;
 }
 
+/* Hide speaker labels in chat mode - position already indicates speaker */
+.transcript-list.chat-style .speaker-label {
+  display: none;
+}
+
 .transcript-list.chat-style .interim-badge {
   font-size: 11px;
   margin-left: 6px;

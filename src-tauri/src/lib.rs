@@ -29,7 +29,7 @@ pub enum TranscriptionProvider {
 
 impl Default for TranscriptionProvider {
     fn default() -> Self {
-        TranscriptionProvider::Groq
+        TranscriptionProvider::Deepgram
     }
 }
 
@@ -63,11 +63,11 @@ impl Default for AppState {
         // Load persisted settings from disk
         let saved_settings = AppSettings::load();
 
-        // Parse transcription provider from saved settings
+        // Parse transcription provider from saved settings (default to Deepgram for real-time)
         let provider = match saved_settings.transcription_provider.to_lowercase().as_str() {
-            "deepgram" => TranscriptionProvider::Deepgram,
+            "groq" => TranscriptionProvider::Groq,
             "assemblyai" => TranscriptionProvider::AssemblyAI,
-            _ => TranscriptionProvider::Groq,
+            _ => TranscriptionProvider::Deepgram,
         };
 
         // Use saved model or default
@@ -289,6 +289,15 @@ async fn start_live_transcription(
 
                     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
 
+                    // Convert speaker ID to label
+                    // Speaker 0 = "You" (typically the first/primary speaker detected)
+                    // Speaker 1+ = "Participant" (other speakers)
+                    let speaker_label = match msg.speaker {
+                        Some(0) => "You".to_string(),
+                        Some(_) => "Participant".to_string(),
+                        None => "Speaker".to_string(),
+                    };
+
                     if msg.is_final {
                         // Final transcript - add to transcription history
                         if let Ok(mut trans) = transcription_state.lock() {
@@ -300,7 +309,7 @@ async fn start_live_transcription(
                             }
                             trans.push(TranscriptSegment {
                                 timestamp: timestamp.clone(),
-                                speaker: "Speaker".to_string(),
+                                speaker: speaker_label.clone(),
                                 text: clean_transcript(&msg.text),
                             });
                         }
@@ -308,7 +317,7 @@ async fn start_live_transcription(
                         let _ = app_clone.emit("transcript-update", TranscriptEvent {
                             text: msg.text,
                             timestamp,
-                            speaker: "Speaker".to_string(),
+                            speaker: speaker_label,
                             is_final: true,
                         });
                     } else {
@@ -317,7 +326,7 @@ async fn start_live_transcription(
                         let _ = app_clone.emit("transcript-update", TranscriptEvent {
                             text: msg.text,
                             timestamp,
-                            speaker: "Speaker".to_string(),
+                            speaker: speaker_label,
                             is_final: false,
                         });
                     }
@@ -682,23 +691,23 @@ async fn set_meeting_context(state: State<'_, AppState>, context: String) -> Res
 async fn get_transcription_providers() -> Result<Vec<serde_json::Value>, String> {
     Ok(vec![
         serde_json::json!({
-            "id": "Groq",
-            "name": "Groq Whisper (Recommended)",
-            "description": "Free, fast, and accurate. Uses Whisper model for transcription.",
+            "id": "Deepgram",
+            "name": "Deepgram (Recommended)",
+            "description": "Real-time streaming with speaker diarization. Words appear as spoken.",
             "recommended": true,
-            "requires_key": "groq"
+            "requires_key": "deepgram"
         }),
         serde_json::json!({
-            "id": "Deepgram",
-            "name": "Deepgram",
-            "description": "Real-time streaming transcription. Very fast response time.",
+            "id": "Groq",
+            "name": "Groq Whisper",
+            "description": "Batch transcription every 4 seconds. Good fallback option.",
             "recommended": false,
-            "requires_key": "deepgram"
+            "requires_key": "groq"
         }),
         serde_json::json!({
             "id": "AssemblyAI",
             "name": "AssemblyAI",
-            "description": "High accuracy transcription with speaker detection.",
+            "description": "High accuracy batch transcription.",
             "recommended": false,
             "requires_key": "assemblyai"
         }),
