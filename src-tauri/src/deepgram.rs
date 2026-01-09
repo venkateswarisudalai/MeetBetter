@@ -23,6 +23,7 @@ struct DeepgramResponse {
 pub struct TranscriptMessage {
     pub text: String,
     pub is_final: bool,
+    pub speaker: Option<u32>,  // Speaker ID from diarization (0, 1, 2, etc.)
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +35,15 @@ struct Channel {
 struct Alternative {
     transcript: String,
     confidence: f32,
+    #[serde(default)]
+    words: Vec<Word>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Word {
+    word: String,
+    #[serde(default)]
+    speaker: Option<u32>,
 }
 
 pub struct DeepgramTranscriber {
@@ -72,6 +82,7 @@ impl DeepgramTranscriber {
 
         // Build WebSocket URL with optimized parameters for real-time streaming
         // Based on learnings from Granola: 100ms endpointing for responsive feel
+        // diarize=true enables speaker identification
         let url = format!(
             "wss://api.deepgram.com/v1/listen?\
             encoding=linear16&\
@@ -83,7 +94,8 @@ impl DeepgramTranscriber {
             endpointing=100&\
             utterance_end_ms=1000&\
             smart_format=true&\
-            vad_events=true",
+            vad_events=true&\
+            diarize=true",
             sample_rate, channels
         );
 
@@ -258,24 +270,33 @@ impl DeepgramTranscriber {
                                             continue;
                                         }
 
+                                        // Extract speaker from words (use the most common speaker in this utterance)
+                                        let speaker = if !alt.words.is_empty() {
+                                            alt.words.first().and_then(|w| w.speaker)
+                                        } else {
+                                            None
+                                        };
+
                                         let is_final = response.is_final.unwrap_or(false);
                                         let speech_final = response.speech_final.unwrap_or(false);
 
                                         // For final results, always emit
                                         // For interim results, only emit if text changed
                                         if is_final || speech_final {
-                                            eprintln!("Deepgram [FINAL]: {}", transcript_text);
+                                            eprintln!("Deepgram [FINAL] Speaker {:?}: {}", speaker, transcript_text);
                                             let _ = transcript_sender.send(TranscriptMessage {
                                                 text: transcript_text.to_string(),
                                                 is_final: true,
+                                                speaker,
                                             }).await;
                                             last_interim_text.clear();
                                         } else if transcript_text != last_interim_text {
                                             // Interim result - show for real-time feedback
-                                            eprintln!("Deepgram [interim]: {}", transcript_text);
+                                            eprintln!("Deepgram [interim] Speaker {:?}: {}", speaker, transcript_text);
                                             let _ = transcript_sender.send(TranscriptMessage {
                                                 text: transcript_text.to_string(),
                                                 is_final: false,
+                                                speaker,
                                             }).await;
                                             last_interim_text = transcript_text.to_string();
                                         }
