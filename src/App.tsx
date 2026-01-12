@@ -8,7 +8,7 @@ interface TranscriptSegment {
   timestamp: string;
   speaker: string;
   text: string;
-  is_final?: boolean;  // true = finalized, false = interim (still being transcribed)
+  is_final?: boolean;
 }
 
 interface MeetingSummary {
@@ -19,114 +19,124 @@ interface MeetingSummary {
   raw_summary: string;
 }
 
+interface CalendarEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  start_time: string;
+  end_time: string;
+  attendees: string[];
+  meeting_link: string | null;
+  is_today: boolean;
+  is_past: boolean;
+}
+
+interface StoredMeeting {
+  id: string;
+  title: string;
+  date: string;
+  duration_seconds: number | null;
+  transcript: TranscriptSegment[];
+  summary: MeetingSummary | null;
+  attendees: string[];
+  calendar_event_id: string | null;
+  recording_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type ViewMode = 'home' | 'meeting-detail' | 'transcript-view';
+
 function App() {
+  // Core state
   const [isLiveTranscribing, setIsLiveTranscribing] = useState(false);
-  const [isRecordingOnly, setIsRecordingOnly] = useState(false);
+  const [isRecordingOnly] = useState(false);
   const [transcription, setTranscription] = useState<TranscriptSegment[]>([]);
-  const [summary, setSummary] = useState("");
+  const [, setSummary] = useState("");
+  const [structuredSummary, setStructuredSummary] = useState<MeetingSummary | null>(null);
+  const [savedRecordingPath, setSavedRecordingPath] = useState<string | null>(null);
+  const [isMockTranscribing, setIsMockTranscribing] = useState(false);
+
+  // API keys state
   const [hasGroqKey, setHasGroqKey] = useState(false);
   const [hasDeepgramKey, setHasDeepgramKey] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [groqKeyInput, setGroqKeyInput] = useState("");
   const [deepgramKeyInput, setDeepgramKeyInput] = useState("");
-  const [isEditingDeepgramKey, setIsEditingDeepgramKey] = useState(false);
-  const [savedRecordingPath, setSavedRecordingPath] = useState<string | null>(null);
-  const [hideFromScreenShare, setHideFromScreenShare] = useState(false);
-  const [screenShareSupported, setScreenShareSupported] = useState(false);
-  const [structuredSummary, setStructuredSummary] = useState<MeetingSummary | null>(null);
-  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
-  const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
-  const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [autoGenerateReplies, setAutoGenerateReplies] = useState(true);
-  const [isTranscribingRecording, setIsTranscribingRecording] = useState(false);
   const [isEditingApiKey, setIsEditingApiKey] = useState(false);
-  const [meetingContext, setMeetingContext] = useState("");
+  const [isEditingDeepgramKey, setIsEditingDeepgramKey] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Calendar state
+  const [isCalendarConnected, setIsCalendarConnected] = useState(false);
+  const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
+  const [googleClientId, setGoogleClientId] = useState("");
+  const [googleClientSecret, setGoogleClientSecret] = useState("");
+  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+
+  // Meetings state
+  const [pastMeetings, setPastMeetings] = useState<StoredMeeting[]>([]);
+  const [selectedMeeting, setSelectedMeeting] = useState<StoredMeeting | null>(null);
+
+  // UI state
+  const [viewMode, setViewMode] = useState<ViewMode>('home');
+  const [showSettings, setShowSettings] = useState(false);
+  const [showSaveMeetingModal, setShowSaveMeetingModal] = useState(false);
+  const [saveMeetingTitle, setSaveMeetingTitle] = useState("");
+  const [, setMeetingContext] = useState("");
   const [contextInput, setContextInput] = useState("");
   const [meetingType, setMeetingType] = useState<string>("custom");
+  const [autoGenerateReplies, setAutoGenerateReplies] = useState(true);
+  const [hideFromScreenShare, setHideFromScreenShare] = useState(false);
+  const [screenShareSupported, setScreenShareSupported] = useState(false);
+  const [suggestionsMinimized, setSuggestionsMinimized] = useState(false);
+
+  // Recording state
+  const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
+  const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [replyError, setReplyError] = useState<string | null>(null);
-  const [isMockTranscribing, setIsMockTranscribing] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
   const lastReplyGenerationTime = useRef(0);
 
-  // Computed app state for UI layout
+  // Computed app state
   type AppState = 'ready' | 'recording' | 'done';
   const appState: AppState = (isLiveTranscribing || isRecordingOnly || isMockTranscribing)
     ? 'recording'
     : (transcription.length > 0 ? 'done' : 'ready');
 
+  // Initialize
   useEffect(() => {
     checkApiKeys();
     checkScreenShareSupport();
+    checkCalendarConnection();
+    loadPastMeetings();
   }, []);
 
-  // Keyboard shortcuts: Press 1-4 to copy suggestions
+  // Load calendar events when connected
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle 1-4 keys when not in an input field
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+    if (isCalendarConnected) {
+      loadUpcomingEvents();
+    }
+  }, [isCalendarConnected]);
 
-      const keyNum = parseInt(e.key);
-      if (keyNum >= 1 && keyNum <= 4 && suggestedReplies.length >= keyNum) {
-        const index = keyNum - 1;
-        handleCopyReply(suggestedReplies[index], index);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [suggestedReplies]);
-
-  // Dev mode: Mock transcription handler
-  const handleMockTranscription = async () => {
-    if (isMockTranscribing) {
-      console.log('Stopping mock transcription...');
-      try {
-        await invoke('stop_mock_transcription');
-        setIsMockTranscribing(false);
-        console.log('Mock transcription stopped');
-      } catch (err) {
-        console.error('Failed to stop mock:', err);
-      }
+  // Recording timer
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isLiveTranscribing || isRecordingOnly) {
+      interval = setInterval(() => {
+        setRecordingTime(t => t + 1);
+      }, 1000);
     } else {
-      console.log('Starting mock transcription...');
-      try {
-        // Uses files: you_1.wav, participant_1.wav, you_2.wav, participant_2.wav, etc.
-        const result = await invoke('start_mock_transcription', {
-          testAudioDir: '/Users/vigneshsubbiah/Documents/MeetBetter/src-tauri/test_audio'
-        });
-        setIsMockTranscribing(true);
-        console.log('Mock transcription started:', result);
-      } catch (err) {
-        console.error('Failed to start mock:', err);
-        alert('Mock transcription failed: ' + err);
-      }
+      setRecordingTime(0);
     }
-  };
+    return () => clearInterval(interval);
+  }, [isLiveTranscribing, isRecordingOnly]);
 
-  const checkScreenShareSupport = async () => {
-    try {
-      const supported = await invoke<boolean>("is_screen_share_exclusion_supported");
-      setScreenShareSupported(supported);
-    } catch (error) {
-      console.error("Failed to check screen share support:", error);
-    }
-  };
-
-  const handleToggleScreenShare = async (enabled: boolean) => {
-    try {
-      await invoke("set_screen_share_exclusion", { exclude: enabled });
-      setHideFromScreenShare(enabled);
-    } catch (error) {
-      console.error("Failed to toggle screen share exclusion:", error);
-    }
-  };
-
+  // Transcript updates listener
   useEffect(() => {
     const unlisten = listen<{ text: string; timestamp: string; speaker: string; is_final: boolean }>(
       "transcript-update",
@@ -141,22 +151,16 @@ function App() {
 
           setTranscription((prev) => {
             if (event.payload.is_final) {
-              // Final result - add to transcript (remove any trailing interim first)
               const lastIndex = prev.length - 1;
               if (lastIndex >= 0 && prev[lastIndex].is_final === false) {
-                // Replace interim with final
                 return [...prev.slice(0, lastIndex), newSegment];
               }
-              // Just add the final result
               return [...prev, newSegment];
             } else {
-              // Interim result - replace previous interim or add new one
               const lastIndex = prev.length - 1;
               if (lastIndex >= 0 && prev[lastIndex].is_final === false) {
-                // Replace existing interim
                 return [...prev.slice(0, lastIndex), newSegment];
               }
-              // Add new interim
               return [...prev, newSegment];
             }
           });
@@ -169,27 +173,19 @@ function App() {
     };
   }, []);
 
-  // Auto-scroll to bottom when new transcription arrives
+  // Auto-scroll transcript
   useEffect(() => {
     transcriptionEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcription]);
 
-  // Auto-generate replies when new transcription arrives (during recording or mock mode)
-  // Only generate when the last speaker is NOT "You" (i.e., when participant speaks)
+  // Auto-generate replies when enabled
   useEffect(() => {
     if ((isLiveTranscribing || isMockTranscribing) && autoGenerateReplies && transcription.length > 0 && transcription.length !== lastTranscriptCount.current) {
       lastTranscriptCount.current = transcription.length;
-
-      // Only generate replies when the other person speaks, not when "You" speak
       const lastSpeaker = transcription[transcription.length - 1]?.speaker;
-      if (lastSpeaker === "You") {
-        return; // Don't generate suggestions for your own speech
-      }
-
-      // Time-based debounce - generate replies at most every 5 seconds
+      if (lastSpeaker === "You") return;
       const now = Date.now();
       const timeSinceLastGeneration = now - lastReplyGenerationTime.current;
-
       if (timeSinceLastGeneration >= 5000 || lastReplyGenerationTime.current === 0) {
         lastReplyGenerationTime.current = now;
         generateRepliesQuietly();
@@ -197,30 +193,22 @@ function App() {
     }
   }, [transcription, isLiveTranscribing, isMockTranscribing, autoGenerateReplies]);
 
-  const generateRepliesQuietly = async () => {
-    if (isGeneratingReplies || !hasGroqKey) return;
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-    setIsGeneratingReplies(true);
-    setReplyError(null);
-    try {
-      const replies = await invoke<string[]>("generate_auto_replies");
-      setSuggestedReplies(replies);
-      setReplyError(null);
-    } catch (error) {
-      console.error("Failed to generate replies:", error);
-      const errorMsg = String(error);
-      if (errorMsg.includes("rate") || errorMsg.includes("429") || errorMsg.includes("limit")) {
-        setReplyError("Rate limited - waiting before retrying");
-      } else if (errorMsg.includes("timeout") || errorMsg.includes("Timeout")) {
-        setReplyError("Request timed out - will retry");
-      } else {
-        setReplyError(errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg);
+      const keyNum = parseInt(e.key);
+      if (keyNum >= 1 && keyNum <= 4 && suggestedReplies.length >= keyNum) {
+        handleCopyReply(suggestedReplies[keyNum - 1], keyNum - 1);
       }
-    } finally {
-      setIsGeneratingReplies(false);
-    }
-  };
+    };
 
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [suggestedReplies]);
+
+  // API Functions
   const checkApiKeys = async () => {
     try {
       const state = await invoke<{
@@ -240,9 +228,44 @@ function App() {
     }
   };
 
+  const checkScreenShareSupport = async () => {
+    try {
+      const supported = await invoke<boolean>("is_screen_share_exclusion_supported");
+      setScreenShareSupported(supported);
+    } catch (error) {
+      console.error("Failed to check screen share support:", error);
+    }
+  };
+
+  const checkCalendarConnection = async () => {
+    try {
+      const connected = await invoke<boolean>("is_calendar_connected");
+      setIsCalendarConnected(connected);
+    } catch (error) {
+      console.error("Failed to check calendar connection:", error);
+    }
+  };
+
+  const loadUpcomingEvents = async () => {
+    try {
+      const events = await invoke<CalendarEvent[]>("get_upcoming_events", { limit: 10 });
+      setUpcomingEvents(events);
+    } catch (error) {
+      console.error("Failed to load upcoming events:", error);
+    }
+  };
+
+  const loadPastMeetings = async () => {
+    try {
+      const meetings = await invoke<StoredMeeting[]>("get_saved_meetings", { limit: 20 });
+      setPastMeetings(meetings);
+    } catch (error) {
+      console.error("Failed to load past meetings:", error);
+    }
+  };
+
   const handleSaveGroqKey = async () => {
     if (!groqKeyInput.trim()) return;
-
     setIsLoading(true);
     try {
       const isValid = await invoke<boolean>("set_groq_api_key", { key: groqKeyInput.trim() });
@@ -260,7 +283,6 @@ function App() {
 
   const handleSaveDeepgramKey = async () => {
     if (!deepgramKeyInput.trim()) return;
-
     setIsLoading(true);
     try {
       const isValid = await invoke<boolean>("set_deepgram_api_key", { key: deepgramKeyInput.trim() });
@@ -276,6 +298,49 @@ function App() {
     }
   };
 
+  const handleConnectCalendar = async () => {
+    if (!googleClientId.trim() || !googleClientSecret.trim()) {
+      alert("Please enter Google Client ID and Secret");
+      return;
+    }
+
+    setIsConnectingCalendar(true);
+    try {
+      await invoke("set_google_credentials", {
+        clientId: googleClientId.trim(),
+        clientSecret: googleClientSecret.trim(),
+      });
+
+      const authUrl = await invoke<string>("get_google_auth_url");
+      await openUrl(authUrl);
+
+      // Show instructions
+      alert("A browser window will open. After authorizing, copy the code from the URL and paste it here.");
+      const code = prompt("Paste the authorization code:");
+
+      if (code) {
+        await invoke("exchange_google_code", { code: code.trim() });
+        setIsCalendarConnected(true);
+        loadUpcomingEvents();
+      }
+    } catch (error) {
+      console.error("Failed to connect calendar:", error);
+      alert("Failed to connect calendar: " + error);
+    } finally {
+      setIsConnectingCalendar(false);
+    }
+  };
+
+  const handleDisconnectCalendar = async () => {
+    try {
+      await invoke("disconnect_calendar");
+      setIsCalendarConnected(false);
+      setUpcomingEvents([]);
+    } catch (error) {
+      console.error("Failed to disconnect calendar:", error);
+    }
+  };
+
   const handleSaveContext = async () => {
     try {
       await invoke("set_meeting_context", { context: contextInput.trim() });
@@ -285,17 +350,20 @@ function App() {
     }
   };
 
-  const handleStartLiveTranscription = async () => {
-    console.log("handleStartLiveTranscription called, hasGroqKey:", hasGroqKey);
-    if (!hasGroqKey) {
-      console.log("No Groq key, returning early");
-      return;
-    }
-
+  const handleToggleScreenShare = async (enabled: boolean) => {
     try {
-      console.log("Calling start_live_transcription...");
+      await invoke("set_screen_share_exclusion", { exclude: enabled });
+      setHideFromScreenShare(enabled);
+    } catch (error) {
+      console.error("Failed to toggle screen share exclusion:", error);
+    }
+  };
+
+  // Recording functions
+  const handleStartLiveTranscription = async () => {
+    if (!hasGroqKey) return;
+    try {
       await invoke("start_live_transcription");
-      console.log("start_live_transcription succeeded");
       setIsLiveTranscribing(true);
       setSuggestedReplies([]);
       lastTranscriptCount.current = 0;
@@ -310,19 +378,14 @@ function App() {
     try {
       const audioPath = await invoke<string>("stop_live_transcription");
       setIsLiveTranscribing(false);
-      if (audioPath) {
-        setSavedRecordingPath(audioPath);
-      }
+      if (audioPath) setSavedRecordingPath(audioPath);
 
-      // Auto-generate summary after stopping
       if (hasGroqKey && transcription.length > 0) {
         setIsGeneratingSummary(true);
         try {
           const summaryResult = await invoke<MeetingSummary>("generate_structured_summary");
           setStructuredSummary(summaryResult);
-          if (summaryResult.raw_summary) {
-            setSummary(summaryResult.raw_summary);
-          }
+          if (summaryResult.raw_summary) setSummary(summaryResult.raw_summary);
         } catch (summaryError) {
           console.error("Failed to generate summary:", summaryError);
         } finally {
@@ -334,76 +397,60 @@ function App() {
     }
   };
 
-  const handleStartRecordingOnly = async () => {
-    try {
-      const audioPath = await invoke<string>("start_recording");
-      setIsRecordingOnly(true);
-      setSavedRecordingPath(audioPath);
-    } catch (error) {
-      console.error("Failed to start recording:", error);
-      alert("Failed to start recording: " + error);
-    }
-  };
-
-  const handleStopRecordingOnly = async () => {
-    try {
-      const audioPath = await invoke<string>("stop_recording");
-      setIsRecordingOnly(false);
-      if (audioPath) {
-        setSavedRecordingPath(audioPath);
-      }
-    } catch (error) {
-      console.error("Failed to stop recording:", error);
-    }
-  };
-
-  const handleGenerateSummary = async () => {
-    if (transcription.length === 0 || !hasGroqKey) return;
-
-    setIsLoading(true);
-    setIsGeneratingSummary(true);
-    try {
-      const summaryResult = await invoke<MeetingSummary>("generate_structured_summary");
-      setStructuredSummary(summaryResult);
-      if (summaryResult.raw_summary) {
-        setSummary(summaryResult.raw_summary);
-      }
-    } catch (error) {
-      console.error("Failed to generate summary:", error);
+  const handleMockTranscription = async () => {
+    if (isMockTranscribing) {
       try {
-        const result = await invoke<string>("generate_summary");
-        setSummary(result);
-        setStructuredSummary(null);
-      } catch (fallbackError) {
-        console.error("Fallback summary failed:", fallbackError);
+        await invoke('stop_mock_transcription');
+        setIsMockTranscribing(false);
+      } catch (err) {
+        console.error('Failed to stop mock:', err);
       }
-    } finally {
-      setIsLoading(false);
-      setIsGeneratingSummary(false);
+    } else {
+      try {
+        await invoke('start_mock_transcription', {
+          testAudioDir: '/Users/vigneshsubbiah/Documents/meetBetter/src-tauri/test_audio'
+        });
+        setIsMockTranscribing(true);
+      } catch (err) {
+        console.error('Failed to start mock:', err);
+        alert('Mock transcription failed: ' + err);
+      }
     }
   };
 
-  const handleGenerateReplies = async () => {
-    if (transcription.length === 0 || !hasGroqKey) return;
-
+  const generateRepliesQuietly = async () => {
+    if (isGeneratingReplies || !hasGroqKey) return;
     setIsGeneratingReplies(true);
     setReplyError(null);
     try {
       const replies = await invoke<string[]>("generate_auto_replies");
       setSuggestedReplies(replies);
-      setReplyError(null);
     } catch (error) {
       console.error("Failed to generate replies:", error);
       const errorMsg = String(error);
-      if (errorMsg.includes("rate") || errorMsg.includes("429") || errorMsg.includes("limit")) {
-        setReplyError("Rate limited - please wait before retrying");
-      } else if (errorMsg.includes("timeout") || errorMsg.includes("Timeout")) {
-        setReplyError("Request timed out");
+      if (errorMsg.includes("rate") || errorMsg.includes("429")) {
+        setReplyError("Rate limited - waiting before retrying");
       } else {
-        setReplyError(errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg);
+        setReplyError(errorMsg.substring(0, 100));
       }
     } finally {
       setIsGeneratingReplies(false);
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    if (transcription.length === 0 || !hasGroqKey) return;
+    setIsLoading(true);
+    setIsGeneratingSummary(true);
+    try {
+      const summaryResult = await invoke<MeetingSummary>("generate_structured_summary");
+      setStructuredSummary(summaryResult);
+      if (summaryResult.raw_summary) setSummary(summaryResult.raw_summary);
+    } catch (error) {
+      console.error("Failed to generate summary:", error);
+    } finally {
+      setIsLoading(false);
+      setIsGeneratingSummary(false);
     }
   };
 
@@ -425,27 +472,98 @@ function App() {
       setStructuredSummary(null);
       setSuggestedReplies([]);
       setSavedRecordingPath(null);
+      setViewMode('home');
     } catch (error) {
       console.error("Failed to clear:", error);
     }
   };
 
-  const handleTranscribeFromRecording = async () => {
-    if (!savedRecordingPath || !hasGroqKey) return;
+  const handleSaveMeeting = async (title: string) => {
+    if (transcription.length === 0) {
+      alert("No transcript to save. Please record a meeting first.");
+      return;
+    }
 
-    setIsTranscribingRecording(true);
     try {
-      const segments = await invoke<TranscriptSegment[]>("transcribe_recording", {
-        filePath: savedRecordingPath
+      console.log("Saving meeting with title:", title, "transcript segments:", transcription.length);
+      console.log("Transcript data:", JSON.stringify(transcription.slice(0, 2)));
+
+      // Strip is_final field from transcript before sending to backend
+      const cleanTranscript = transcription.map(seg => ({
+        timestamp: seg.timestamp,
+        speaker: seg.speaker,
+        text: seg.text,
+      }));
+
+      // Pass transcript and summary from frontend state
+      // Note: Tauri expects snake_case parameter names
+      const meetingId = await invoke<string>("save_meeting", {
+        title,
+        attendees: [],
+        calendar_event_id: null,
+        duration_seconds: recordingTime > 0 ? recordingTime : null,
+        transcript: cleanTranscript,
+        summary: structuredSummary,
       });
-      if (segments.length > 0) {
-        setTranscription(prev => [...prev, ...segments]);
+      console.log("Meeting saved with ID:", meetingId);
+
+      // Clear current state and go back to home
+      await invoke("clear_transcription");
+      setTranscription([]);
+      setSummary("");
+      setStructuredSummary(null);
+      setSuggestedReplies([]);
+      setSavedRecordingPath(null);
+
+      // Reload meetings list
+      await loadPastMeetings();
+
+      // Go to home view to see saved meetings
+      setViewMode('home');
+
+      alert("Meeting saved! View it in Past Meetings.");
+    } catch (error) {
+      console.error("Failed to save meeting:", error);
+      alert("Failed to save meeting: " + error);
+    }
+  };
+
+  const handleViewMeeting = (meeting: StoredMeeting) => {
+    setSelectedMeeting(meeting);
+    setViewMode('meeting-detail');
+  };
+
+  const handleDeleteMeeting = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this meeting?")) return;
+    try {
+      await invoke("delete_meeting", { id });
+      loadPastMeetings();
+      if (selectedMeeting?.id === id) {
+        setSelectedMeeting(null);
+        setViewMode('home');
       }
     } catch (error) {
-      console.error("Failed to transcribe recording:", error);
-      alert("Failed to transcribe recording: " + error);
-    } finally {
-      setIsTranscribingRecording(false);
+      console.error("Failed to delete meeting:", error);
+    }
+  };
+
+  // Meeting type presets
+  const meetingPresets: Record<string, { label: string; context: string }> = {
+    interview: { label: "Interview", context: "Job interview. I'm the candidate." },
+    sales: { label: "Sales Call", context: "Sales call with a potential client." },
+    team: { label: "Team Meeting", context: "Internal team meeting." },
+    "1on1": { label: "1:1", context: "One-on-one meeting." },
+    custom: { label: "Custom", context: "" }
+  };
+
+  const handleMeetingTypeChange = (type: string) => {
+    setMeetingType(type);
+    const preset = meetingPresets[type];
+    if (preset && preset.context) {
+      setContextInput(preset.context);
+      invoke("set_meeting_context", { context: preset.context }).then(() => {
+        setMeetingContext(preset.context);
+      });
     }
   };
 
@@ -455,58 +573,63 @@ function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Meeting type presets with context templates
-  const meetingPresets: Record<string, { label: string; context: string }> = {
-    interview: {
-      label: "Interview",
-      context: "Job interview. I'm the candidate. Help me highlight my experience, ask insightful questions about the role, and demonstrate genuine interest. Be confident but not arrogant."
-    },
-    sales: {
-      label: "Sales Call",
-      context: "Sales call with a potential client. I'm the seller. Help me understand their needs, address objections gracefully, build rapport, and guide toward next steps. Focus on value, not features."
-    },
-    team: {
-      label: "Team Meeting",
-      context: "Internal team meeting. Help me contribute constructively, suggest solutions, take ownership of action items, and keep discussions focused and productive."
-    },
-    "1on1": {
-      label: "1:1",
-      context: "One-on-one meeting. Help me listen actively, ask thoughtful follow-up questions, provide supportive feedback, and ensure both parties feel heard."
-    },
-    custom: {
-      label: "Custom",
-      context: ""
-    }
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
-
-  const handleMeetingTypeChange = (type: string) => {
-    setMeetingType(type);
-    const preset = meetingPresets[type];
-    if (preset && preset.context) {
-      setContextInput(preset.context);
-      // Auto-save the preset context
-      invoke("set_meeting_context", { context: preset.context }).then(() => {
-        setMeetingContext(preset.context);
-      });
-    }
-  };
-
-  const [recordingTime, setRecordingTime] = useState(0);
-
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (isLiveTranscribing || isRecordingOnly) {
-      interval = setInterval(() => {
-        setRecordingTime(t => t + 1);
-      }, 1000);
-    } else {
-      setRecordingTime(0);
-    }
-    return () => clearInterval(interval);
-  }, [isLiveTranscribing, isRecordingOnly]);
 
   return (
     <div className={`app-minimal ${appState}`}>
+      {/* Save Meeting Modal */}
+      {showSaveMeetingModal && (
+        <div className="modal-overlay" onClick={() => setShowSaveMeetingModal(false)}>
+          <div className="settings-modal save-meeting-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Save Meeting</h2>
+              <button className="close-btn" onClick={() => setShowSaveMeetingModal(false)}>×</button>
+            </div>
+            <div className="modal-content">
+              <div className="setting-item">
+                <label>Meeting Title</label>
+                <input
+                  type="text"
+                  value={saveMeetingTitle}
+                  onChange={(e) => setSaveMeetingTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && saveMeetingTitle.trim()) {
+                      handleSaveMeeting(saveMeetingTitle.trim());
+                      setShowSaveMeetingModal(false);
+                    }
+                  }}
+                  placeholder="Enter meeting title"
+                  autoFocus
+                />
+              </div>
+              <div className="modal-actions">
+                <button className="text-btn" onClick={() => setShowSaveMeetingModal(false)}>Cancel</button>
+                <button
+                  className="primary-btn"
+                  onClick={() => {
+                    if (saveMeetingTitle.trim()) {
+                      handleSaveMeeting(saveMeetingTitle.trim());
+                      setShowSaveMeetingModal(false);
+                    }
+                  }}
+                  disabled={!saveMeetingTitle.trim()}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
@@ -536,9 +659,7 @@ function App() {
                       onChange={(e) => setGroqKeyInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSaveGroqKey()}
                     />
-                    <button onClick={handleSaveGroqKey} disabled={isLoading || !groqKeyInput.trim()}>
-                      Save
-                    </button>
+                    <button onClick={handleSaveGroqKey} disabled={isLoading || !groqKeyInput.trim()}>Save</button>
                   </div>
                 )}
                 <span className="help-link" onClick={() => openUrl("https://console.groq.com/keys")}>
@@ -565,14 +686,49 @@ function App() {
                       onChange={(e) => setDeepgramKeyInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSaveDeepgramKey()}
                     />
-                    <button onClick={handleSaveDeepgramKey} disabled={isLoading || !deepgramKeyInput.trim()}>
-                      Save
-                    </button>
+                    <button onClick={handleSaveDeepgramKey} disabled={isLoading || !deepgramKeyInput.trim()}>Save</button>
                   </div>
                 )}
                 <span className="help-link" onClick={() => openUrl("https://console.deepgram.com/")}>
                   Get Deepgram key →
                 </span>
+              </div>
+
+              {/* Google Calendar */}
+              <div className="setting-item">
+                <label>Google Calendar</label>
+                <p className="setting-hint">Connect to see your upcoming meetings</p>
+                {isCalendarConnected ? (
+                  <div className="api-status">
+                    <span className="status-dot connected"></span>
+                    <span>Connected</span>
+                    <button className="text-btn danger" onClick={handleDisconnectCalendar}>Disconnect</button>
+                  </div>
+                ) : (
+                  <div className="calendar-setup">
+                    <input
+                      type="text"
+                      placeholder="Google Client ID"
+                      value={googleClientId}
+                      onChange={(e) => setGoogleClientId(e.target.value)}
+                    />
+                    <input
+                      type="password"
+                      placeholder="Google Client Secret"
+                      value={googleClientSecret}
+                      onChange={(e) => setGoogleClientSecret(e.target.value)}
+                    />
+                    <button
+                      onClick={handleConnectCalendar}
+                      disabled={isConnectingCalendar || !googleClientId.trim() || !googleClientSecret.trim()}
+                    >
+                      {isConnectingCalendar ? "Connecting..." : "Connect Calendar"}
+                    </button>
+                    <span className="help-link" onClick={() => openUrl("https://console.cloud.google.com/apis/credentials")}>
+                      Get Google credentials (free) →
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Auto-suggest */}
@@ -603,16 +759,13 @@ function App() {
                 </div>
               )}
 
-              {/* Dev Mode in Settings */}
+              {/* Dev Mode */}
               {import.meta.env.DEV && (
                 <div className="setting-item">
                   <label>Mock Test</label>
                   <button
                     className={`text-btn dev-link ${isMockTranscribing ? 'active' : ''}`}
-                    onClick={() => {
-                      handleMockTranscription();
-                      setShowSettings(false);
-                    }}
+                    onClick={() => { handleMockTranscription(); setShowSettings(false); }}
                   >
                     {isMockTranscribing ? "Stop" : "Run"}
                   </button>
@@ -623,20 +776,75 @@ function App() {
         </div>
       )}
 
-      {/* READY STATE - Clean centered start screen */}
-      {appState === 'ready' && (
-        <div className="ready-screen">
-          <header className="minimal-header">
-            <span className="logo">MeetBetter</span>
-            <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">
-              ⚙️
-            </button>
-          </header>
+      {/* READY STATE - Home with sidebar */}
+      {appState === 'ready' && viewMode === 'home' && (
+        <div className="home-layout">
+          {/* Sidebar */}
+          <aside className="sidebar">
+            <div className="sidebar-header">
+              <span className="logo">Vantage</span>
+              <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
+            </div>
 
-          <main className="ready-content">
+            {/* Coming Up Section */}
+            <div className="sidebar-section">
+              <h3>Coming up</h3>
+              {isCalendarConnected ? (
+                upcomingEvents.length > 0 ? (
+                  <div className="event-list">
+                    {upcomingEvents.slice(0, 5).map((event) => (
+                      <div key={event.id} className={`event-item ${event.is_today ? 'today' : ''}`}>
+                        <div className="event-date">
+                          <span className="month">{new Date(event.start_time).toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}</span>
+                          <span className="day">{new Date(event.start_time).getDate()}</span>
+                        </div>
+                        <div className="event-info">
+                          <span className="event-title">{event.title}</span>
+                          <span className="event-time">{formatDate(event.start_time)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-state">No upcoming events</p>
+                )
+              ) : (
+                <p className="empty-state">
+                  <button className="text-btn" onClick={() => setShowSettings(true)}>Connect Google Calendar</button>
+                </p>
+              )}
+            </div>
+
+            {/* Past Meetings Section */}
+            <div className="sidebar-section">
+              <h3>Past Meetings</h3>
+              {pastMeetings.length > 0 ? (
+                <div className="meeting-list">
+                  {pastMeetings.slice(0, 10).map((meeting) => (
+                    <div
+                      key={meeting.id}
+                      className="meeting-item"
+                      onClick={() => handleViewMeeting(meeting)}
+                    >
+                      <div className="meeting-icon">📄</div>
+                      <div className="meeting-info">
+                        <span className="meeting-title">{meeting.title}</span>
+                        <span className="meeting-date">{formatDate(meeting.date)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-state">No saved meetings yet</p>
+              )}
+            </div>
+          </aside>
+
+          {/* Main Content */}
+          <main className="main-content">
             {!(hasGroqKey || hasDeepgramKey) ? (
               <div className="setup-prompt">
-                <h1>Welcome to MeetBetter</h1>
+                <h1>Welcome to Vantage</h1>
                 <p>Add your API keys to get started</p>
                 <button className="primary-btn large" onClick={() => setShowSettings(true)}>
                   Open Settings
@@ -680,10 +888,74 @@ function App() {
         </div>
       )}
 
-      {/* RECORDING STATE - Full-screen transcript with floating suggestions */}
+      {/* Meeting Detail View */}
+      {appState === 'ready' && viewMode === 'meeting-detail' && selectedMeeting && (
+        <div className="meeting-detail-view">
+          <header className="detail-header">
+            <button className="back-btn" onClick={() => { setViewMode('home'); setSelectedMeeting(null); }}>
+              ← Back
+            </button>
+            <h2>{selectedMeeting.title}</h2>
+            <button className="icon-btn danger" onClick={() => handleDeleteMeeting(selectedMeeting.id)} title="Delete">
+              🗑️
+            </button>
+          </header>
+
+          <div className="detail-content">
+            <div className="detail-meta">
+              <span>{formatDate(selectedMeeting.date)}</span>
+              {selectedMeeting.duration_seconds && (
+                <span>Duration: {formatTime(selectedMeeting.duration_seconds)}</span>
+              )}
+              {selectedMeeting.attendees.length > 0 && (
+                <span>Attendees: {selectedMeeting.attendees.join(', ')}</span>
+              )}
+            </div>
+
+            {/* Summary */}
+            {selectedMeeting.summary && (
+              <section className="detail-section">
+                <h3>Summary</h3>
+                {selectedMeeting.summary.key_points?.length > 0 && (
+                  <div className="summary-group">
+                    <h4>Key Points</h4>
+                    <ul>{selectedMeeting.summary.key_points.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                  </div>
+                )}
+                {selectedMeeting.summary.action_items?.length > 0 && (
+                  <div className="summary-group">
+                    <h4>Action Items</h4>
+                    <ul>{selectedMeeting.summary.action_items.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                  </div>
+                )}
+                {selectedMeeting.summary.decisions?.length > 0 && (
+                  <div className="summary-group">
+                    <h4>Decisions</h4>
+                    <ul>{selectedMeeting.summary.decisions.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Transcript */}
+            <section className="detail-section">
+              <h3>Transcript ({selectedMeeting.transcript.length} segments)</h3>
+              <div className="transcript-list compact">
+                {selectedMeeting.transcript.map((seg, i) => (
+                  <div key={i} className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'}`}>
+                    <span className="speaker">{seg.speaker}:</span>
+                    <span className="text">{seg.text}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* RECORDING STATE */}
       {appState === 'recording' && (
         <div className="recording-screen">
-          {/* Minimal header during recording */}
           <header className="recording-header">
             <div className="recording-status">
               <span className="rec-dot"></span>
@@ -696,31 +968,20 @@ function App() {
               </div>
             </div>
             <button className="stop-btn" onClick={() => {
-              if (isLiveTranscribing) {
-                handleStopLiveTranscription();
-              } else if (isMockTranscribing) {
-                handleMockTranscription();
-              } else if (isRecordingOnly) {
-                handleStopRecordingOnly();
-              }
+              if (isLiveTranscribing) handleStopLiveTranscription();
+              else if (isMockTranscribing) handleMockTranscription();
             }}>
               Stop
             </button>
           </header>
 
-          {/* Transcript Area - Takes most of the screen */}
           <main className="transcript-main">
             {transcription.length === 0 ? (
-              <div className="empty-transcript">
-                <p>Listening...</p>
-              </div>
+              <div className="empty-transcript"><p>Listening...</p></div>
             ) : (
               <div className="transcript-list chat-style">
                 {transcription.map((seg, i) => (
-                  <div
-                    key={i}
-                    className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'} ${seg.is_final === false ? 'interim' : ''}`}
-                  >
+                  <div key={i} className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'} ${seg.is_final === false ? 'interim' : ''}`}>
                     <div className="message-bubble">
                       <span className="speaker-label">{seg.speaker}</span>
                       <p>{seg.text}</p>
@@ -733,62 +994,65 @@ function App() {
             )}
           </main>
 
-          {/* Floating Suggestions at Bottom */}
-          {suggestedReplies.length > 0 && (() => {
-            const parseSuggestion = (s: string) => {
-              const isRecommended = s.startsWith('★');
-              const cleaned = s.replace(/^★\s*/, '');
-              const match = cleaned.match(/^(PROBE|INSIGHT|MIRROR|REFRAME|CLARIFY|LABEL):\s*(.+)$/i);
-              if (match) {
-                return { type: match[1].toUpperCase(), text: match[2], isRecommended, raw: s };
-              }
-              return { type: 'OTHER', text: cleaned, isRecommended, raw: s };
-            };
-
-            const parsed = suggestedReplies.map(parseSuggestion);
-            const recommended = parsed.find(p => p.isRecommended);
-            const others = parsed.filter(p => !p.isRecommended);
-
-            return (
-              <div className="floating-suggestions">
-                {recommended && (
-                  <button
-                    className={`suggestion-chip recommended ${copiedIndex === suggestedReplies.indexOf(recommended.raw) ? 'copied' : ''}`}
-                    onClick={() => handleCopyReply(recommended.raw, suggestedReplies.indexOf(recommended.raw))}
-                  >
-                    <span className="chip-label">★</span>
-                    <span className="chip-text">{recommended.text}</span>
-                  </button>
-                )}
-                {others.slice(0, 3).map((item, i) => (
-                  <button
-                    key={i}
-                    className={`suggestion-chip ${copiedIndex === suggestedReplies.indexOf(item.raw) ? 'copied' : ''}`}
-                    onClick={() => handleCopyReply(item.raw, suggestedReplies.indexOf(item.raw))}
-                  >
-                    <span className="chip-label">{item.type}</span>
-                    <span className="chip-text">{item.text}</span>
-                  </button>
-                ))}
-                {isGeneratingReplies && <span className="generating-indicator">...</span>}
+          {/* Collapsible Suggestions Panel */}
+          {autoGenerateReplies && (
+            <div className={`suggestions-panel ${suggestionsMinimized ? 'minimized' : ''}`}>
+              <div className="suggestions-header">
+                <span className="suggestions-title">
+                  {isGeneratingReplies ? 'Generating...' : 'Suggested Replies'}
+                </span>
+                <button
+                  className="minimize-btn"
+                  onClick={() => setSuggestionsMinimized(!suggestionsMinimized)}
+                  title={suggestionsMinimized ? 'Expand' : 'Minimize'}
+                >
+                  {suggestionsMinimized ? '↑' : '−'}
+                </button>
               </div>
-            );
-          })()}
-
-          {replyError && (
-            <div className="error-toast">
-              {replyError}
+              {!suggestionsMinimized && (
+                <div className="suggestions-content">
+                  {suggestedReplies.length > 0 ? (
+                    <div className="reply-list">
+                      {suggestedReplies.map((reply, i) => (
+                        <div
+                          key={i}
+                          className={`reply-item ${copiedIndex === i ? 'copied' : ''}`}
+                          onClick={() => handleCopyReply(reply, i)}
+                        >
+                          <span className="reply-key">{i + 1}</span>
+                          <span className="reply-text">{reply}</span>
+                          <span className="copy-hint">{copiedIndex === i ? 'Copied!' : 'Click to copy'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-suggestions">
+                      {isGeneratingReplies ? (
+                        <p>Analyzing conversation...</p>
+                      ) : replyError ? (
+                        <p className="error">{replyError}</p>
+                      ) : (
+                        <p>Suggestions will appear as the conversation progresses</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* DONE STATE - Summary view */}
+      {/* DONE STATE */}
       {appState === 'done' && (
         <div className="done-screen">
           <header className="minimal-header">
-            <span className="logo">MeetBetter</span>
+            <span className="logo">Vantage</span>
             <div className="header-actions">
+              <button className="text-btn" onClick={() => {
+                setSaveMeetingTitle("Meeting " + new Date().toLocaleDateString());
+                setShowSaveMeetingModal(true);
+              }}>Save Meeting</button>
               <button className="text-btn" onClick={handleClearAll}>New Meeting</button>
               <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
             </div>
@@ -799,11 +1063,7 @@ function App() {
             <section className="summary-section-main">
               <div className="section-title">
                 <h2>Meeting Summary</h2>
-                <button
-                  className="generate-btn"
-                  onClick={handleGenerateSummary}
-                  disabled={isGeneratingSummary}
-                >
+                <button className="generate-btn" onClick={handleGenerateSummary} disabled={isGeneratingSummary}>
                   {isGeneratingSummary ? "Generating..." : structuredSummary ? "Refresh" : "Generate"}
                 </button>
               </div>
@@ -815,41 +1075,31 @@ function App() {
                   {structuredSummary.key_points?.length > 0 && (
                     <div className="summary-group">
                       <h3>Key Points</h3>
-                      <ul>
-                        {structuredSummary.key_points.map((p, i) => <li key={i}>{p}</li>)}
-                      </ul>
+                      <ul>{structuredSummary.key_points.map((p, i) => <li key={i}>{p}</li>)}</ul>
                     </div>
                   )}
                   {structuredSummary.action_items?.length > 0 && (
                     <div className="summary-group actions">
                       <h3>Action Items</h3>
-                      <ul>
-                        {structuredSummary.action_items.map((p, i) => <li key={i}>{p}</li>)}
-                      </ul>
+                      <ul>{structuredSummary.action_items.map((p, i) => <li key={i}>{p}</li>)}</ul>
                     </div>
                   )}
                   {structuredSummary.decisions?.length > 0 && (
                     <div className="summary-group">
                       <h3>Decisions</h3>
-                      <ul>
-                        {structuredSummary.decisions.map((p, i) => <li key={i}>{p}</li>)}
-                      </ul>
+                      <ul>{structuredSummary.decisions.map((p, i) => <li key={i}>{p}</li>)}</ul>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="empty-summary">
-                  <p>Click "Generate" to create a meeting summary</p>
-                </div>
+                <div className="empty-summary"><p>Click "Generate" to create a meeting summary</p></div>
               )}
             </section>
 
-            {/* Collapsible Transcript */}
+            {/* Transcript Section */}
             <section className="transcript-section">
               <details>
-                <summary>
-                  <h3>Full Transcript ({transcription.length} segments)</h3>
-                </summary>
+                <summary><h3>Full Transcript ({transcription.length} segments)</h3></summary>
                 <div className="transcript-list compact">
                   {transcription.map((seg, i) => (
                     <div key={i} className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'}`}>
@@ -861,12 +1111,9 @@ function App() {
               </details>
             </section>
 
-            {/* Saved Recording */}
             {savedRecordingPath && (
               <section className="recording-section">
-                <p className="recording-path">
-                  Recording saved: {savedRecordingPath.split('/').pop()}
-                </p>
+                <p className="recording-path">Recording saved: {savedRecordingPath.split('/').pop()}</p>
               </section>
             )}
           </main>
