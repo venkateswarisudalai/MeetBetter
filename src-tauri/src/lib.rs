@@ -8,6 +8,8 @@ use tokio::sync::{mpsc, watch};
 
 mod assemblyai;
 mod audio;
+mod calendar;
+mod database;
 mod deepgram;
 pub mod groq;  // Public for mock_test binary
 mod mock;
@@ -56,6 +58,11 @@ pub struct AppState {
     // Mock transcription state
     pub is_mock_transcribing: Arc<Mutex<bool>>,
     pub mock_stop_signal: Arc<Mutex<Option<watch::Sender<bool>>>>,
+    // Google Calendar
+    pub google_client_id: Arc<Mutex<String>>,
+    pub google_client_secret: Arc<Mutex<String>>,
+    // Meetings database
+    pub meetings_db: Arc<Mutex<database::MeetingsDatabase>>,
 }
 
 impl Default for AppState {
@@ -98,19 +105,27 @@ impl Default for AppState {
             deepgram_transcriber: Arc::new(Mutex::new(None)),
             deepgram_stop_flag: Arc::new(AtomicBool::new(false)),
             settings: Arc::new(Mutex::new(saved_settings.clone())),
-            meeting_context: Arc::new(Mutex::new(saved_settings.meeting_context)),
+            meeting_context: Arc::new(Mutex::new(saved_settings.meeting_context.clone())),
             // Mock transcription state
             is_mock_transcribing: Arc::new(Mutex::new(false)),
             mock_stop_signal: Arc::new(Mutex::new(None)),
+            // Google Calendar credentials (loaded from settings)
+            google_client_id: Arc::new(Mutex::new(saved_settings.google_client_id.clone())),
+            google_client_secret: Arc::new(Mutex::new(saved_settings.google_client_secret.clone())),
+            // Meetings database
+            meetings_db: Arc::new(Mutex::new(database::MeetingsDatabase::load())),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct TranscriptSegment {
     pub timestamp: String,
     pub speaker: String,
     pub text: String,
+    #[serde(default, skip_serializing)]
+    pub is_final: bool,
 }
 
 /// Filler words to remove from transcripts for cleaner output
@@ -311,6 +326,7 @@ async fn start_live_transcription(
                                 timestamp: timestamp.clone(),
                                 speaker: speaker_label.clone(),
                                 text: clean_transcript(&msg.text),
+                                ..Default::default()
                             });
                         }
 
@@ -453,6 +469,7 @@ async fn start_live_transcription(
                                                             timestamp: timestamp.clone(),
                                                             speaker: "Speaker".to_string(),
                                                             text: clean_transcript(&new_text),
+                                                            ..Default::default()
                                                         });
                                                     }
 
@@ -735,6 +752,7 @@ async fn add_transcription(
         timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
         speaker,
         text: clean_transcript(&text),
+        ..Default::default()
     };
     state.transcription.lock().map_err(|e| e.to_string())?.push(segment);
     Ok(())
@@ -751,6 +769,7 @@ async fn add_manual_transcript(
         timestamp,
         speaker,
         text: clean_transcript(&text),
+        ..Default::default()
     };
     state.transcription.lock().map_err(|e| e.to_string())?.push(segment);
     Ok(())
@@ -788,6 +807,7 @@ async fn transcribe_recording(state: State<'_, AppState>, file_path: String) -> 
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                     speaker: "Speaker".to_string(),
                     text: cleaned_text,
+                    ..Default::default()
                 };
                 segments.push(segment.clone());
                 state.transcription.lock().map_err(|e| e.to_string())?.push(segment);
@@ -881,6 +901,68 @@ MEETING TRANSCRIPT:
     Ok(summary)
 }
 
+/// Parse a text-format summary into structured MeetingSummary
+/// Handles formats like:
+/// ## KEY POINTS
+/// • point 1
+/// • point 2
+fn parse_text_summary(text: &str) -> MeetingSummary {
+    let mut key_points = Vec::new();
+    let mut action_items = Vec::new();
+    let mut decisions = Vec::new();
+    let mut notes = Vec::new();
+
+    let mut current_section: Option<&str> = None;
+
+    for line in text.lines() {
+        let line = line.trim();
+
+        // Detect section headers
+        let lower = line.to_lowercase();
+        if lower.contains("key point") || lower.contains("keypoint") {
+            current_section = Some("key_points");
+            continue;
+        } else if lower.contains("action item") || lower.contains("action_item") {
+            current_section = Some("action_items");
+            continue;
+        } else if lower.contains("decision") {
+            current_section = Some("decisions");
+            continue;
+        } else if lower.contains("note") {
+            current_section = Some("notes");
+            continue;
+        }
+
+        // Extract bullet points
+        if line.starts_with('•') || line.starts_with('-') || line.starts_with('*') {
+            let content = line[1..].trim().to_string();
+            if !content.is_empty() && content.to_lowercase() != "none" && !content.to_lowercase().contains("none identified") {
+                match current_section {
+                    Some("key_points") => key_points.push(content),
+                    Some("action_items") => action_items.push(content),
+                    Some("decisions") => decisions.push(content),
+                    Some("notes") => notes.push(content),
+                    Some(_) | None => {
+                        // Default to notes if no section detected or unknown section
+                        notes.push(content);
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("Parsed text summary: {} key points, {} action items, {} decisions, {} notes",
+        key_points.len(), action_items.len(), decisions.len(), notes.len());
+
+    MeetingSummary {
+        key_points,
+        action_items,
+        decisions,
+        notes,
+        raw_summary: text.to_string(),
+    }
+}
+
 #[tauri::command]
 async fn generate_structured_summary(state: State<'_, AppState>) -> Result<MeetingSummary, String> {
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
@@ -916,27 +998,30 @@ MEETING TRANSCRIPT:
     );
 
     let response = groq::generate(&api_key, &model, &prompt).await.map_err(|e| e.to_string())?;
+    eprintln!("Summary response from AI (first 500 chars): {}", &response.chars().take(500).collect::<String>());
 
     // Try to parse JSON response
     let summary: MeetingSummary = match serde_json::from_str(&response) {
-        Ok(s) => s,
-        Err(_) => {
+        Ok(s) => {
+            eprintln!("Successfully parsed JSON summary");
+            s
+        },
+        Err(e1) => {
+            eprintln!("Direct JSON parse failed: {}", e1);
             // If JSON parsing fails, try to extract JSON from the response
             let json_start = response.find('{').unwrap_or(0);
             let json_end = response.rfind('}').map(|i| i + 1).unwrap_or(response.len());
             let json_str = &response[json_start..json_end];
 
             match serde_json::from_str(json_str) {
-                Ok(s) => s,
-                Err(_) => {
-                    // Fallback: return raw summary
-                    MeetingSummary {
-                        key_points: vec![],
-                        action_items: vec![],
-                        decisions: vec![],
-                        notes: vec![],
-                        raw_summary: response.clone(),
-                    }
+                Ok(s) => {
+                    eprintln!("Successfully parsed extracted JSON");
+                    s
+                },
+                Err(e2) => {
+                    eprintln!("Extracted JSON parse failed: {}. Falling back to text parsing.", e2);
+                    // Fallback: parse the text format into structured data
+                    parse_text_summary(&response)
                 }
             }
         }
@@ -950,9 +1035,16 @@ MEETING TRANSCRIPT:
         if summary.decisions.is_empty() { "• None identified".to_string() } else { summary.decisions.iter().map(|p| format!("• {}", p)).collect::<Vec<_>>().join("\n") },
         if summary.notes.is_empty() { "• None".to_string() } else { summary.notes.iter().map(|p| format!("• {}", p)).collect::<Vec<_>>().join("\n") }
     );
-    *state.summary.lock().map_err(|e| e.to_string())? = raw;
+    *state.summary.lock().map_err(|e| e.to_string())? = raw.clone();
 
-    Ok(summary)
+    // Return summary with raw_summary populated
+    Ok(MeetingSummary {
+        key_points: summary.key_points,
+        action_items: summary.action_items,
+        decisions: summary.decisions,
+        notes: summary.notes,
+        raw_summary: raw,
+    })
 }
 
 #[tauri::command]
@@ -1182,6 +1274,201 @@ async fn stop_mock_transcription(state: State<'_, AppState>) -> Result<(), Strin
     Ok(())
 }
 
+// ============== Calendar Commands ==============
+
+/// Set Google OAuth credentials
+#[tauri::command]
+async fn set_google_credentials(
+    state: State<'_, AppState>,
+    client_id: String,
+    client_secret: String,
+) -> Result<bool, String> {
+    *state.google_client_id.lock().map_err(|e| e.to_string())? = client_id.clone();
+    *state.google_client_secret.lock().map_err(|e| e.to_string())? = client_secret.clone();
+
+    // Persist to settings
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.google_client_id = client_id;
+    settings.google_client_secret = client_secret;
+    settings.save().map_err(|e| e.to_string())?;
+
+    Ok(true)
+}
+
+/// Get Google OAuth auth URL
+#[tauri::command]
+async fn get_google_auth_url(state: State<'_, AppState>) -> Result<String, String> {
+    let client_id = state.google_client_id.lock().map_err(|e| e.to_string())?.clone();
+    let client_secret = state.google_client_secret.lock().map_err(|e| e.to_string())?.clone();
+
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err("Google credentials not set. Please add them in Settings.".to_string());
+    }
+
+    let cal = calendar::GoogleCalendar::new(client_id, client_secret);
+    Ok(cal.get_auth_url())
+}
+
+/// Exchange Google OAuth code for tokens
+#[tauri::command]
+async fn exchange_google_code(state: State<'_, AppState>, code: String) -> Result<bool, String> {
+    let client_id = state.google_client_id.lock().map_err(|e| e.to_string())?.clone();
+    let client_secret = state.google_client_secret.lock().map_err(|e| e.to_string())?.clone();
+
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err("Google credentials not set".to_string());
+    }
+
+    let cal = calendar::GoogleCalendar::new(client_id, client_secret);
+    cal.exchange_code(&code).await?;
+    Ok(true)
+}
+
+/// Check if Google Calendar is connected
+#[tauri::command]
+fn is_calendar_connected() -> bool {
+    calendar::is_calendar_connected()
+}
+
+/// Disconnect Google Calendar
+#[tauri::command]
+fn disconnect_calendar() -> Result<(), String> {
+    calendar::disconnect_calendar()
+}
+
+/// Get upcoming calendar events
+#[tauri::command]
+async fn get_upcoming_events(state: State<'_, AppState>, limit: Option<u32>) -> Result<Vec<calendar::SimpleCalendarEvent>, String> {
+    let client_id = state.google_client_id.lock().map_err(|e| e.to_string())?.clone();
+    let client_secret = state.google_client_secret.lock().map_err(|e| e.to_string())?.clone();
+
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err("Google credentials not set".to_string());
+    }
+
+    let cal = calendar::GoogleCalendar::new(client_id, client_secret);
+    cal.get_upcoming_events(limit).await
+}
+
+/// Get past calendar events
+#[tauri::command]
+async fn get_past_calendar_events(state: State<'_, AppState>, days: Option<i64>, limit: Option<u32>) -> Result<Vec<calendar::SimpleCalendarEvent>, String> {
+    let client_id = state.google_client_id.lock().map_err(|e| e.to_string())?.clone();
+    let client_secret = state.google_client_secret.lock().map_err(|e| e.to_string())?.clone();
+
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err("Google credentials not set".to_string());
+    }
+
+    let cal = calendar::GoogleCalendar::new(client_id, client_secret);
+    cal.get_past_events(days, limit).await
+}
+
+// ============== Meetings Database Commands ==============
+
+/// Save current meeting to database
+#[tauri::command]
+async fn save_meeting(
+    state: State<'_, AppState>,
+    title: String,
+    attendees: Vec<String>,
+    calendar_event_id: Option<String>,
+    duration_seconds: Option<u64>,
+    transcript: Option<Vec<TranscriptSegment>>,
+    summary: Option<MeetingSummary>,
+) -> Result<String, String> {
+    // Use provided transcript or fall back to state
+    let transcription = if let Some(t) = transcript {
+        if t.is_empty() {
+            return Err("No transcription to save".to_string());
+        }
+        t
+    } else {
+        let t = state.transcription.lock().map_err(|e| e.to_string())?.clone();
+        if t.is_empty() {
+            return Err("No transcription to save".to_string());
+        }
+        t
+    };
+
+    eprintln!("Saving meeting '{}' with {} transcript segments", title, transcription.len());
+
+    let recording_path = state.current_recording_path.lock().map_err(|e| e.to_string())?.clone();
+
+    // Use provided summary or fall back to state
+    let meeting_summary = if let Some(s) = summary {
+        eprintln!("Using provided summary with {} key points, {} action items", s.key_points.len(), s.action_items.len());
+        // If structured fields are empty but raw_summary exists, parse it
+        if s.key_points.is_empty() && s.action_items.is_empty() && !s.raw_summary.is_empty() {
+            eprintln!("Parsing raw_summary into structured fields...");
+            let parsed = parse_text_summary(&s.raw_summary);
+            eprintln!("Parsed: {} key points, {} action items, {} decisions, {} notes",
+                parsed.key_points.len(), parsed.action_items.len(), parsed.decisions.len(), parsed.notes.len());
+            Some(parsed)
+        } else {
+            Some(s)
+        }
+    } else {
+        // Fall back to raw summary text from state
+        let summary_text = state.summary.lock().map_err(|e| e.to_string())?.clone();
+        if !summary_text.is_empty() {
+            eprintln!("Parsing state summary into structured fields...");
+            Some(parse_text_summary(&summary_text))
+        } else {
+            None
+        }
+    };
+
+    let meeting = database::create_meeting_from_transcript(
+        title,
+        transcription,
+        meeting_summary,
+        attendees,
+        calendar_event_id,
+        recording_path,
+        duration_seconds,
+    );
+
+    let meeting_id = meeting.id.clone();
+    eprintln!("Created meeting with ID: {}", meeting_id);
+
+    let mut db = state.meetings_db.lock().map_err(|e| e.to_string())?;
+    db.add_meeting(meeting)?;
+    eprintln!("Meeting saved to database");
+
+    Ok(meeting_id)
+}
+
+/// Get all saved meetings
+#[tauri::command]
+async fn get_saved_meetings(state: State<'_, AppState>, limit: Option<usize>) -> Result<Vec<database::StoredMeeting>, String> {
+    let db = state.meetings_db.lock().map_err(|e| e.to_string())?;
+    let meetings = db.get_past_meetings(limit);
+    Ok(meetings.into_iter().cloned().collect())
+}
+
+/// Get a specific meeting by ID
+#[tauri::command]
+async fn get_meeting_by_id(state: State<'_, AppState>, id: String) -> Result<Option<database::StoredMeeting>, String> {
+    let db = state.meetings_db.lock().map_err(|e| e.to_string())?;
+    Ok(db.get_meeting(&id).cloned())
+}
+
+/// Delete a meeting
+#[tauri::command]
+async fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let mut db = state.meetings_db.lock().map_err(|e| e.to_string())?;
+    db.delete_meeting(&id)
+}
+
+/// Search meetings
+#[tauri::command]
+async fn search_meetings(state: State<'_, AppState>, query: String) -> Result<Vec<database::StoredMeeting>, String> {
+    let db = state.meetings_db.lock().map_err(|e| e.to_string())?;
+    let meetings = db.search_meetings(&query);
+    Ok(meetings.into_iter().cloned().collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1217,6 +1504,20 @@ pub fn run() {
             get_screen_share_platform_info,
             start_mock_transcription,
             stop_mock_transcription,
+            // Calendar commands
+            set_google_credentials,
+            get_google_auth_url,
+            exchange_google_code,
+            is_calendar_connected,
+            disconnect_calendar,
+            get_upcoming_events,
+            get_past_calendar_events,
+            // Meetings database commands
+            save_meeting,
+            get_saved_meetings,
+            get_meeting_by_id,
+            delete_meeting,
+            search_meetings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

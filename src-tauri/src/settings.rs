@@ -22,6 +22,10 @@ pub struct AppSettings {
     pub transcription_provider: String,
     #[serde(default)]
     pub meeting_context: String,
+    #[serde(default)]
+    pub google_client_id: String,
+    #[serde(default)]
+    pub google_client_secret: String,
 }
 
 impl AppSettings {

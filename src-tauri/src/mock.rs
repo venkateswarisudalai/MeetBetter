@@ -84,6 +84,7 @@ pub async fn run_mock_session(
                             timestamp: timestamp.clone(),
                             speaker: "You".to_string(),
                             text: text.clone(),
+                            ..Default::default()
                         });
                     }
 
@@ -117,6 +118,7 @@ pub async fn run_mock_session(
                             timestamp: timestamp.clone(),
                             speaker: "Participant".to_string(),
                             text: text.clone(),
+                            ..Default::default()
                         });
                     }
 
