@@ -9,11 +9,14 @@ use std::sync::{
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::system_audio::{get_system_audio_device, AudioSource};
+
 #[derive(Debug, Deserialize)]
 struct DeepgramResponse {
     #[serde(rename = "type")]
     msg_type: Option<String>,
     channel: Option<Channel>,
+    channel_index: Option<Vec<usize>>,  // [channel_idx, num_channels] for multichannel
     is_final: Option<bool>,
     speech_final: Option<bool>,
 }
@@ -24,6 +27,7 @@ pub struct TranscriptMessage {
     pub text: String,
     pub is_final: bool,
     pub speaker: Option<u32>,  // Speaker ID from diarization (0, 1, 2, etc.)
+    pub source: AudioSource,   // Which audio source this came from
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,38 +70,71 @@ impl DeepgramTranscriber {
 
         self.is_running.store(true, Ordering::SeqCst);
 
-        // Get audio device
+        // Get audio devices
         let host = cpal::default_host();
-        let device = host
+        let mic_device = host
             .default_input_device()
-            .ok_or_else(|| anyhow!("No input device"))?;
-        let config = device.default_input_config()?;
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels();
+            .ok_or_else(|| anyhow!("No microphone found"))?;
+        let mic_config = mic_device.default_input_config()?;
+        let sample_rate = mic_config.sample_rate().0;
+
+        // Check for system audio device (BlackHole, etc.)
+        let system_device = get_system_audio_device();
+        let has_system_audio = system_device.is_some();
+
+        // Determine channels: 2 for stereo (mic + system), 1 for mono (mic only)
+        let channels = if has_system_audio { 2 } else { 1 };
 
         eprintln!(
-            "Deepgram: sample_rate={}, channels={}",
-            sample_rate, channels
+            "Deepgram: sample_rate={}, channels={} ({})",
+            sample_rate,
+            channels,
+            if has_system_audio { "stereo: mic + system" } else { "mono: mic only" }
         );
 
-        // Build WebSocket URL with optimized parameters for real-time streaming
-        // Based on learnings from Granola: 100ms endpointing for responsive feel
-        // diarize=true enables speaker identification
-        let url = format!(
-            "wss://api.deepgram.com/v1/listen?\
-            encoding=linear16&\
-            sample_rate={}&\
-            channels={}&\
-            model=nova-2&\
-            punctuate=true&\
-            interim_results=true&\
-            endpointing=100&\
-            utterance_end_ms=1000&\
-            smart_format=true&\
-            vad_events=true&\
-            diarize=true",
-            sample_rate, channels
-        );
+        if has_system_audio {
+            eprintln!("Multichannel mode enabled: Channel 0 = You (mic), Channel 1 = Participants (system audio)");
+        } else {
+            eprintln!("No system audio device found. Install BlackHole for speaker separation.");
+            eprintln!("  Download: https://github.com/ExistentialAudio/BlackHole");
+        }
+
+        // Build WebSocket URL with multichannel support
+        // multichannel=true tells Deepgram to transcribe each channel separately
+        let url = if has_system_audio {
+            format!(
+                "wss://api.deepgram.com/v1/listen?\
+                encoding=linear16&\
+                sample_rate={}&\
+                channels=2&\
+                model=nova-2&\
+                punctuate=true&\
+                interim_results=true&\
+                endpointing=100&\
+                utterance_end_ms=1000&\
+                smart_format=true&\
+                vad_events=true&\
+                multichannel=true",
+                sample_rate
+            )
+        } else {
+            // Fallback to mono with diarization
+            format!(
+                "wss://api.deepgram.com/v1/listen?\
+                encoding=linear16&\
+                sample_rate={}&\
+                channels=1&\
+                model=nova-2&\
+                punctuate=true&\
+                interim_results=true&\
+                endpointing=100&\
+                utterance_end_ms=1000&\
+                smart_format=true&\
+                vad_events=true&\
+                diarize=true",
+                sample_rate
+            )
+        };
 
         eprintln!("Connecting to Deepgram...");
 
@@ -143,97 +180,217 @@ impl DeepgramTranscriber {
         let is_running_audio = is_running.clone();
 
         std::thread::spawn(move || {
-            let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-            let buffer_clone = buffer.clone();
+            // Buffer size for ~100ms of audio (per channel)
+            let samples_per_100ms = sample_rate as usize / 10;
+            let buffer_size_mono = samples_per_100ms * 2; // 16-bit = 2 bytes per sample
+            let buffer_size_stereo = samples_per_100ms * 4; // 2 channels * 2 bytes
 
-            // Send audio every ~100ms for low latency
-            let buffer_size = (sample_rate as usize / 10) * 2 * channels as usize;
+            if has_system_audio {
+                // STEREO MODE: Capture mic and system audio separately, interleave
+                let mic_buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
+                let system_buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
 
-            let err_fn = |err| eprintln!("Audio stream error: {}", err);
+                // Build mic stream
+                let mic_buffer_clone = mic_buffer.clone();
+                let mic_config_stream = cpal::StreamConfig {
+                    channels: 1,
+                    sample_rate: cpal::SampleRate(sample_rate),
+                    buffer_size: cpal::BufferSize::Default,
+                };
 
-            let stream_result = match config.sample_format() {
-                cpal::SampleFormat::F32 => {
-                    let buffer_clone_inner = buffer_clone.clone();
-                    let audio_tx_inner = audio_tx.clone();
-                    device.build_input_stream(
-                        &config.into(),
-                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                            // Convert f32 to i16 bytes (little endian)
-                            let bytes: Vec<u8> = data
-                                .iter()
-                                .flat_map(|&s| {
-                                    let sample_i16 = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
-                                    sample_i16.to_le_bytes().to_vec()
-                                })
-                                .collect();
+                let mic_stream = mic_device.build_input_stream(
+                    &mic_config_stream,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let samples: Vec<i16> = data
+                            .iter()
+                            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+                            .collect();
+                        if let Ok(mut buf) = mic_buffer_clone.lock() {
+                            buf.extend(samples);
+                        }
+                    },
+                    |err| eprintln!("Mic stream error: {}", err),
+                    None,
+                );
 
-                            if let Ok(mut buf) = buffer_clone_inner.lock() {
-                                buf.extend(bytes);
-                                if buf.len() >= buffer_size {
-                                    let chunk: Vec<u8> = buf.drain(..).collect();
-                                    let _ = audio_tx_inner.blocking_send(chunk);
+                // Build system audio stream
+                let system_buffer_clone = system_buffer.clone();
+                let sys_device = system_device.unwrap();
+                let sys_config = cpal::StreamConfig {
+                    channels: 2, // BlackHole is typically stereo
+                    sample_rate: cpal::SampleRate(sample_rate),
+                    buffer_size: cpal::BufferSize::Default,
+                };
+
+                let system_stream = sys_device.build_input_stream(
+                    &sys_config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        // Mix stereo to mono (average left and right)
+                        let samples: Vec<i16> = data
+                            .chunks(2)
+                            .map(|chunk| {
+                                let left = chunk.get(0).copied().unwrap_or(0.0);
+                                let right = chunk.get(1).copied().unwrap_or(0.0);
+                                let mono = (left + right) / 2.0;
+                                (mono.clamp(-1.0, 1.0) * 32767.0) as i16
+                            })
+                            .collect();
+                        if let Ok(mut buf) = system_buffer_clone.lock() {
+                            buf.extend(samples);
+                        }
+                    },
+                    |err| eprintln!("System audio stream error: {}", err),
+                    None,
+                );
+
+                // Start streams
+                if let Ok(ref stream) = mic_stream {
+                    let _ = stream.play();
+                    eprintln!("Microphone capture started (Channel 0 = You)");
+                }
+
+                if let Ok(ref stream) = system_stream {
+                    let _ = stream.play();
+                    eprintln!("System audio capture started (Channel 1 = Participants)");
+                }
+
+                // Main loop: interleave audio and send
+                while is_running_audio.load(Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+
+                    let mic_samples: Vec<i16>;
+                    let system_samples: Vec<i16>;
+
+                    // Get mic samples
+                    {
+                        let mut buf = mic_buffer.lock().unwrap();
+                        if buf.len() >= samples_per_100ms {
+                            mic_samples = buf.drain(..samples_per_100ms).collect();
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    // Get system samples
+                    {
+                        let mut buf = system_buffer.lock().unwrap();
+                        if buf.len() >= samples_per_100ms {
+                            system_samples = buf.drain(..samples_per_100ms).collect();
+                        } else {
+                            // Pad with silence if system audio is behind
+                            system_samples = vec![0i16; samples_per_100ms];
+                        }
+                    }
+
+                    // Interleave as stereo: [mic_0, sys_0, mic_1, sys_1, ...]
+                    // Channel 0 (left) = Microphone = You
+                    // Channel 1 (right) = System Audio = Participants
+                    let mut stereo_bytes: Vec<u8> = Vec::with_capacity(samples_per_100ms * 4);
+                    for i in 0..samples_per_100ms {
+                        let mic_sample = mic_samples.get(i).copied().unwrap_or(0);
+                        let sys_sample = system_samples.get(i).copied().unwrap_or(0);
+
+                        // Left channel (mic) - Channel 0
+                        stereo_bytes.extend_from_slice(&mic_sample.to_le_bytes());
+                        // Right channel (system) - Channel 1
+                        stereo_bytes.extend_from_slice(&sys_sample.to_le_bytes());
+                    }
+
+                    if audio_tx.blocking_send(stereo_bytes).is_err() {
+                        break;
+                    }
+                }
+            } else {
+                // MONO MODE: Just capture mic (original behavior)
+                let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+                let buffer_clone = buffer.clone();
+
+                let err_fn = |err| eprintln!("Audio stream error: {}", err);
+
+                let stream_result = match mic_config.sample_format() {
+                    cpal::SampleFormat::F32 => {
+                        let buffer_clone_inner = buffer_clone.clone();
+                        let audio_tx_inner = audio_tx.clone();
+                        mic_device.build_input_stream(
+                            &mic_config.into(),
+                            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                                let bytes: Vec<u8> = data
+                                    .iter()
+                                    .flat_map(|&s| {
+                                        let sample_i16 = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+                                        sample_i16.to_le_bytes().to_vec()
+                                    })
+                                    .collect();
+
+                                if let Ok(mut buf) = buffer_clone_inner.lock() {
+                                    buf.extend(bytes);
+                                    if buf.len() >= buffer_size_mono {
+                                        let chunk: Vec<u8> = buf.drain(..).collect();
+                                        let _ = audio_tx_inner.blocking_send(chunk);
+                                    }
                                 }
-                            }
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                cpal::SampleFormat::I16 => {
-                    let buffer_clone_inner = buffer_clone.clone();
-                    let audio_tx_inner = audio_tx.clone();
-                    device.build_input_stream(
-                        &config.into(),
-                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                            let bytes: Vec<u8> = data
-                                .iter()
-                                .flat_map(|&s| s.to_le_bytes().to_vec())
-                                .collect();
+                            },
+                            err_fn,
+                            None,
+                        )
+                    }
+                    cpal::SampleFormat::I16 => {
+                        let buffer_clone_inner = buffer_clone.clone();
+                        let audio_tx_inner = audio_tx.clone();
+                        mic_device.build_input_stream(
+                            &mic_config.into(),
+                            move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                                let bytes: Vec<u8> = data
+                                    .iter()
+                                    .flat_map(|&s| s.to_le_bytes().to_vec())
+                                    .collect();
 
-                            if let Ok(mut buf) = buffer_clone_inner.lock() {
-                                buf.extend(bytes);
-                                if buf.len() >= buffer_size {
-                                    let chunk: Vec<u8> = buf.drain(..).collect();
-                                    let _ = audio_tx_inner.blocking_send(chunk);
+                                if let Ok(mut buf) = buffer_clone_inner.lock() {
+                                    buf.extend(bytes);
+                                    if buf.len() >= buffer_size_mono {
+                                        let chunk: Vec<u8> = buf.drain(..).collect();
+                                        let _ = audio_tx_inner.blocking_send(chunk);
+                                    }
                                 }
-                            }
-                        },
-                        err_fn,
-                        None,
-                    )
-                }
-                _ => {
-                    eprintln!("Unsupported sample format");
-                    return;
-                }
-            };
-
-            match stream_result {
-                Ok(stream) => {
-                    if let Err(e) = stream.play() {
-                        eprintln!("Failed to play stream: {}", e);
+                            },
+                            err_fn,
+                            None,
+                        )
+                    }
+                    _ => {
+                        eprintln!("Unsupported sample format");
                         return;
                     }
-                    eprintln!("Audio capture started!");
-                    while is_running_audio.load(Ordering::SeqCst) {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
+                };
+
+                match stream_result {
+                    Ok(stream) => {
+                        if let Err(e) = stream.play() {
+                            eprintln!("Failed to play stream: {}", e);
+                            return;
+                        }
+                        eprintln!("Audio capture started!");
+                        while is_running_audio.load(Ordering::SeqCst) {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        eprintln!("Audio capture stopped");
                     }
-                    eprintln!("Audio capture stopped");
-                }
-                Err(e) => {
-                    eprintln!("Failed to build audio stream: {}", e);
+                    Err(e) => {
+                        eprintln!("Failed to build audio stream: {}", e);
+                    }
                 }
             }
+
+            eprintln!("Audio capture thread ended");
         });
 
-        // Task to send audio to WebSocket (send raw bytes, not base64)
+        // Task to send audio to WebSocket
         let is_running_send = is_running.clone();
         tokio::spawn(async move {
             eprintln!("Audio sender task started");
             while is_running_send.load(Ordering::SeqCst) {
                 match audio_rx.recv().await {
                     Some(bytes) => {
-                        // Deepgram expects raw binary audio, not base64
                         if let Err(e) = write.send(Message::Binary(bytes)).await {
                             eprintln!("Failed to send audio: {}", e);
                             break;
@@ -242,23 +399,24 @@ impl DeepgramTranscriber {
                     None => break,
                 }
             }
-            // Send close frame
             let _ = write.close().await;
             eprintln!("Audio sender task ended");
         });
 
         // Task to receive transcripts
         let is_running_recv = is_running.clone();
+        let has_system_audio_recv = has_system_audio;
         tokio::spawn(async move {
             eprintln!("Transcript receiver task started");
-            let mut last_interim_text = String::new();
+            let mut last_interim_text_ch0 = String::new();
+            let mut last_interim_text_ch1 = String::new();
 
             while is_running_recv.load(Ordering::SeqCst) {
                 match read.next().await {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<DeepgramResponse>(&text) {
                             Ok(response) => {
-                                // Skip non-Results messages (like Metadata, SpeechStarted, etc.)
+                                // Skip non-Results messages
                                 if response.msg_type.as_deref() != Some("Results") {
                                     continue;
                                 }
@@ -270,41 +428,72 @@ impl DeepgramTranscriber {
                                             continue;
                                         }
 
-                                        // Extract speaker from words (use the most common speaker in this utterance)
-                                        let speaker = if !alt.words.is_empty() {
-                                            alt.words.first().and_then(|w| w.speaker)
+                                        // Determine audio source from channel index
+                                        let (source, last_interim) = if has_system_audio_recv {
+                                            // Multichannel mode: channel_index[0] tells us which channel
+                                            let channel_idx = response.channel_index
+                                                .as_ref()
+                                                .and_then(|arr| arr.first().copied())
+                                                .unwrap_or(0);
+
+                                            if channel_idx == 0 {
+                                                (AudioSource::Microphone, &mut last_interim_text_ch0)
+                                            } else {
+                                                (AudioSource::SystemAudio, &mut last_interim_text_ch1)
+                                            }
                                         } else {
-                                            None
+                                            // Mono mode: use diarization speaker ID
+                                            // Speaker 0 assumed to be you (first detected)
+                                            let speaker = alt.words.first().and_then(|w| w.speaker);
+                                            if speaker == Some(0) {
+                                                (AudioSource::Microphone, &mut last_interim_text_ch0)
+                                            } else {
+                                                (AudioSource::SystemAudio, &mut last_interim_text_ch1)
+                                            }
                                         };
+
+                                        // Extract speaker from words for additional context
+                                        let speaker = alt.words.first().and_then(|w| w.speaker);
 
                                         let is_final = response.is_final.unwrap_or(false);
                                         let speech_final = response.speech_final.unwrap_or(false);
 
-                                        // For final results, always emit
-                                        // For interim results, only emit if text changed
+                                        let source_label = match source {
+                                            AudioSource::Microphone => "You",
+                                            AudioSource::SystemAudio => "Participant",
+                                        };
+
                                         if is_final || speech_final {
-                                            eprintln!("Deepgram [FINAL] Speaker {:?}: {}", speaker, transcript_text);
+                                            eprintln!("Deepgram [FINAL] {} (ch={:?}): {}",
+                                                source_label,
+                                                response.channel_index,
+                                                transcript_text
+                                            );
                                             let _ = transcript_sender.send(TranscriptMessage {
                                                 text: transcript_text.to_string(),
                                                 is_final: true,
                                                 speaker,
+                                                source,
                                             }).await;
-                                            last_interim_text.clear();
-                                        } else if transcript_text != last_interim_text {
-                                            // Interim result - show for real-time feedback
-                                            eprintln!("Deepgram [interim] Speaker {:?}: {}", speaker, transcript_text);
+                                            last_interim.clear();
+                                        } else if transcript_text != *last_interim {
+                                            eprintln!("Deepgram [interim] {} (ch={:?}): {}",
+                                                source_label,
+                                                response.channel_index,
+                                                transcript_text
+                                            );
                                             let _ = transcript_sender.send(TranscriptMessage {
                                                 text: transcript_text.to_string(),
                                                 is_final: false,
                                                 speaker,
+                                                source,
                                             }).await;
-                                            last_interim_text = transcript_text.to_string();
+                                            *last_interim = transcript_text.to_string();
                                         }
                                     }
                                 }
                             }
                             Err(e) => {
-                                // Ignore parse errors for metadata messages
                                 if !text.contains("Metadata") && !text.contains("SpeechStarted") {
                                     eprintln!("Parse warning: {}", e);
                                 }
@@ -329,6 +518,7 @@ impl DeepgramTranscriber {
             eprintln!("Transcript receiver task ended");
         });
 
+        eprintln!("Deepgram transcriber completed normally");
         Ok(())
     }
 
@@ -350,9 +540,12 @@ mod tests {
         let msg = TranscriptMessage {
             text: "Hello world".to_string(),
             is_final: true,
+            speaker: Some(0),
+            source: AudioSource::Microphone,
         };
         assert!(msg.is_final);
         assert_eq!(msg.text, "Hello world");
+        assert_eq!(msg.source, AudioSource::Microphone);
     }
 
     #[test]
@@ -360,26 +553,11 @@ mod tests {
         let msg = TranscriptMessage {
             text: "Hello...".to_string(),
             is_final: false,
+            speaker: Some(1),
+            source: AudioSource::SystemAudio,
         };
         assert!(!msg.is_final);
         assert_eq!(msg.text, "Hello...");
-    }
-
-    #[test]
-    fn test_deepgram_url_params() {
-        // Verify the expected parameters are in our URL format
-        let expected_params = vec![
-            "model=nova-2",
-            "endpointing=100",
-            "interim_results=true",
-            "smart_format=true",
-            "utterance_end_ms=1000",
-            "vad_events=true",
-        ];
-
-        // This is a compile-time check that we have the right structure
-        for param in expected_params {
-            assert!(!param.is_empty());
-        }
+        assert_eq!(msg.source, AudioSource::SystemAudio);
     }
 }

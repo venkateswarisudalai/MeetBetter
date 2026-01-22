@@ -21,6 +21,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "mock_test"
 path = "src/bin/mock_test.rs"
 
+[[bin]]
+name = "speaker_test"
+path = "src/bin/speaker_test.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
