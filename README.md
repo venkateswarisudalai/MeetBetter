@@ -40,8 +40,8 @@ A powerful, privacy-focused desktop application for real-time meeting transcript
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/meeting-assistant.git
-cd meeting-assistant
+git clone https://github.com/venkateswarisudalai/MeetBetter.git
+cd MeetBetter
 
 # Install dependencies
 npm install
@@ -51,6 +51,225 @@ npm run tauri dev
 
 # Build for production
 npm run tauri build
+```
+
+## Complete Setup Guide
+
+### Step 1: Install System Dependencies
+
+#### macOS:
+```bash
+# Install Homebrew (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Node.js
+brew install node
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Optional: Install BlackHole for dual audio capture
+brew install blackhole-2ch
+```
+
+#### Windows:
+```powershell
+# Install Node.js from https://nodejs.org/
+
+# Install Rust
+# Download and run: https://win.rustup.rs/
+
+# Optional: Install VB-Cable for dual audio capture
+# Download from: https://vb-audio.com/Cable/
+```
+
+#### Linux:
+```bash
+# Install Node.js (Ubuntu/Debian)
+sudo apt update
+sudo apt install nodejs npm
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Install build dependencies
+sudo apt install libwebkit2gtk-4.0-dev \
+    build-essential \
+    curl \
+    wget \
+    file \
+    libssl-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev
+```
+
+### Step 2: Clone and Build
+
+```bash
+# Clone the repository
+git clone https://github.com/venkateswarisudalai/MeetBetter.git
+cd MeetBetter
+
+# Install JavaScript dependencies
+npm install
+
+# Build and run in development mode
+npm run tauri dev
+```
+
+The app should launch automatically! 🚀
+
+### Step 3: Configure API Keys
+
+1. **Get API Keys** (both have free tiers):
+   - **Deepgram**: Sign up at https://console.deepgram.com
+     - Navigate to API Keys → Create New Key
+     - Copy the key
+   - **Groq**: Sign up at https://console.groq.com
+     - Go to API Keys → Create API Key
+     - Copy the key
+
+2. **Add Keys to App**:
+   - Open MeetBetter app
+   - Click **Settings** icon (gear icon in top right)
+   - Paste your Deepgram API key
+   - Paste your Groq API key
+   - Click **Save**
+
+### Step 4: Set Up Dual Audio (Optional)
+
+**Why do this?** Separates "You" (microphone) from "Participant" (system audio/remote speakers) in transcriptions.
+
+#### Option A: BlackHole Only (Testing - No Audio Playback)
+
+```bash
+# macOS - Install BlackHole
+brew install blackhole-2ch
+
+# Set audio output
+# System Settings → Sound → Output → Select "BlackHole 2ch"
+```
+
+⚠️ **Note:** You won't hear audio with this setup, but channel separation will work perfectly for testing.
+
+#### Option B: Multi-Output Device (Recommended - Hear Audio)
+
+1. **Install BlackHole** (if not already):
+   ```bash
+   brew install blackhole-2ch
+   ```
+
+2. **Create Multi-Output Device**:
+   - Open **Audio MIDI Setup** app (in /Applications/Utilities/)
+   - Click the **"+"** button at bottom left
+   - Select **"Create Multi-Output Device"**
+   - In the right panel, check **both**:
+     - ✓ **BlackHole 2ch**
+     - ✓ **MacBook Pro Speakers** (or your output device)
+   - Optional: Right-click the Multi-Output Device → "Use This Device For Sound Output"
+
+3. **Set System Output**:
+   - Open **System Settings** → **Sound** → **Output**
+   - Select **"Multi-Output Device"**
+
+4. **Adjust Volume**:
+   - Keep speaker volume **low to medium** (prevents microphone from picking up speaker audio)
+   - For best results during real meetings, use **headphones** instead
+
+5. **Test It**:
+   ```bash
+   # Run the included test script
+   ./switch-audio.sh
+
+   # Or manually test
+   say "This is participant audio" &
+   # Then speak into your mic
+   ```
+
+6. **Verify in MeetBetter**:
+   - Start Live Transcription
+   - Play a video → should show **"Participant:"**
+   - Speak into mic → should show **"You:"**
+
+### Step 5: Set Up Calendar Auto-Start (Optional)
+
+**Why do this?** Automatically start transcription when your meetings begin.
+
+1. **Enable Feature**:
+   - Open MeetBetter → **Settings**
+   - Scroll to **"Meeting Auto-Start"** section
+   - Toggle **"Auto-start on meeting time"** to ON
+
+2. **Connect Google Calendar**:
+   - Click **"Connect Calendar"** button
+   - Sign in with your Google account
+   - Grant calendar read permissions
+   - You'll be redirected back to the app
+
+3. **Configure Settings**:
+   - **Start buffer time**: How many minutes before meeting to start (default: 2 minutes)
+   - **Detect meeting apps**: Auto-detect Zoom, Teams, Google Meet, etc. (recommended: ON)
+   - **Auto-start on time**: Start transcription automatically (recommended: ON)
+
+4. **Test It**:
+   - Create a test meeting in Google Calendar (5 minutes from now)
+   - Open Zoom/Teams/Meet app
+   - MeetBetter should show "Meeting starting in X minutes"
+   - Transcription should auto-start when buffer time is reached
+
+### Step 6: Grant Permissions (macOS)
+
+When you first run the app, macOS will ask for permissions:
+
+1. **Microphone Access**: Click **"OK"** to allow
+   - Required for transcription
+   - Can manage later in: System Settings → Privacy & Security → Microphone
+
+2. **Accessibility** (if using calendar auto-start):
+   - System Settings → Privacy & Security → Accessibility
+   - Add MeetBetter and toggle ON
+
+### Troubleshooting Setup
+
+**Build fails with "xcrun: error"** (macOS):
+```bash
+xcode-select --install
+```
+
+**Rust not found**:
+```bash
+source $HOME/.cargo/env
+# Or restart your terminal
+```
+
+**Node version too old**:
+```bash
+# macOS
+brew upgrade node
+
+# Or use nvm
+nvm install 18
+nvm use 18
+```
+
+**Can't hear audio with Multi-Output**:
+- Verify both devices are checked in Audio MIDI Setup
+- Check System Settings → Sound → Output shows "Multi-Output Device"
+- Increase speaker volume slightly
+
+**Dual audio not working**:
+```bash
+# Verify BlackHole is installed
+ls /Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver
+
+# If missing, reinstall
+brew reinstall blackhole-2ch
+
+# Restart Mac after installation
+sudo reboot
 ```
 
 ## API Setup
