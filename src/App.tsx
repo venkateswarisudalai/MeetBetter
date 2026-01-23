@@ -1240,10 +1240,7 @@ function App() {
           <header className="minimal-header">
             <span className="logo">Vantage</span>
             <div className="header-actions">
-              <button className="text-btn" onClick={() => {
-                setViewMode('home');
-                loadPastMeetings();
-              }}>← Back to Home</button>
+              <button className="text-btn" onClick={handleClearAll}>← Back to Home</button>
               <button className="text-btn" onClick={() => {
                 setSaveMeetingTitle("Meeting " + new Date().toLocaleDateString());
                 setShowSaveMeetingModal(true);
