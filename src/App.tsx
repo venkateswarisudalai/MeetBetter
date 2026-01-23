@@ -602,9 +602,21 @@ function App() {
       await loadPastMeetings();
 
       // Go to home view to see saved meetings
+      // Clear the current meeting
+      await invoke("clear_transcription");
+      setTranscription([]);
+      setSummary("");
+      setStructuredSummary(null);
+      setSuggestedReplies([]);
+      setSavedRecordingPath(null);
+
+      // Reload past meetings to show the newly saved one
+      await loadPastMeetings();
+
+      // Go back to home view
       setViewMode('home');
 
-      alert("Meeting saved! View it in Past Meetings.");
+      alert("Meeting saved successfully! You can find it in Past Meetings.");
     } catch (error) {
       console.error("Failed to save meeting:", error);
       alert("Failed to save meeting: " + error);
@@ -1004,9 +1016,17 @@ function App() {
                       </div>
                     </div>
                   ))}
+                  {pastMeetings.length > 10 && (
+                    <p className="meeting-list-more">+{pastMeetings.length - 10} more meetings</p>
+                  )}
                 </div>
               ) : (
-                <p className="empty-state">No saved meetings yet</p>
+                <div className="meeting-list-empty">
+                  <p>No saved meetings yet</p>
+                  <p style={{marginTop: '8px', fontSize: '12px'}}>
+                    Start a meeting and click "Save Meeting" to see it here
+                  </p>
+                </div>
               )}
             </div>
           </aside>
@@ -1220,6 +1240,7 @@ function App() {
           <header className="minimal-header">
             <span className="logo">Vantage</span>
             <div className="header-actions">
+              <button className="text-btn" onClick={handleClearAll}>← Back to Home</button>
               <button className="text-btn" onClick={() => {
                 setSaveMeetingTitle("Meeting " + new Date().toLocaleDateString());
                 setShowSaveMeetingModal(true);
