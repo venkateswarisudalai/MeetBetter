@@ -31,6 +31,21 @@ interface CalendarEvent {
   is_past: boolean;
 }
 
+interface MeetingMonitorSettings {
+  enabled: boolean;
+  start_buffer_minutes: number;
+  detect_meeting_apps: boolean;
+  auto_start_on_time: boolean;
+}
+
+interface MeetingStatus {
+  is_meeting_detected: boolean;
+  meeting_app_running: string | null;
+  upcoming_meeting: CalendarEvent | null;
+  minutes_until_meeting: number | null;
+  auto_start_triggered: boolean;
+}
+
 interface StoredMeeting {
   id: string;
   title: string;
@@ -72,6 +87,15 @@ function App() {
   const [googleClientId, setGoogleClientId] = useState("");
   const [googleClientSecret, setGoogleClientSecret] = useState("");
   const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+
+  // Meeting monitor state
+  const [meetingMonitorSettings, setMeetingMonitorSettings] = useState<MeetingMonitorSettings>({
+    enabled: true,
+    start_buffer_minutes: 2,
+    detect_meeting_apps: true,
+    auto_start_on_time: true,
+  });
+  const [meetingStatus, setMeetingStatus] = useState<MeetingStatus | null>(null);
 
   // Meetings state
   const [pastMeetings, setPastMeetings] = useState<StoredMeeting[]>([]);
@@ -208,6 +232,56 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [suggestedReplies]);
 
+  // Load meeting monitor settings on mount
+  useEffect(() => {
+    const loadMeetingMonitorSettings = async () => {
+      try {
+        const settings = await invoke<MeetingMonitorSettings>("get_meeting_monitor_settings");
+        setMeetingMonitorSettings(settings);
+      } catch (error) {
+        console.error("Failed to load meeting monitor settings:", error);
+      }
+    };
+    loadMeetingMonitorSettings();
+  }, []);
+
+  // Listen for meeting auto-start event
+  useEffect(() => {
+    const unlisten = listen("meeting-auto-start", () => {
+      console.log("Meeting auto-start triggered!");
+      // Auto-start live transcription
+      if (!isLiveTranscribing && hasDeepgramKey) {
+        handleStartLiveTranscription();
+      }
+    });
+
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, [isLiveTranscribing, hasDeepgramKey]);
+
+  // Poll meeting status periodically when calendar is connected
+  useEffect(() => {
+    if (!isCalendarConnected || !meetingMonitorSettings.enabled) {
+      return;
+    }
+
+    const pollMeetingStatus = async () => {
+      try {
+        const status = await invoke<MeetingStatus>("get_meeting_status");
+        setMeetingStatus(status);
+      } catch (error) {
+        console.error("Failed to get meeting status:", error);
+      }
+    };
+
+    // Poll immediately and then every 10 seconds
+    pollMeetingStatus();
+    const interval = setInterval(pollMeetingStatus, 10000);
+
+    return () => clearInterval(interval);
+  }, [isCalendarConnected, meetingMonitorSettings.enabled]);
+
   // API Functions
   const checkApiKeys = async () => {
     try {
@@ -338,6 +412,15 @@ function App() {
       setUpcomingEvents([]);
     } catch (error) {
       console.error("Failed to disconnect calendar:", error);
+    }
+  };
+
+  const handleUpdateMeetingMonitorSettings = async (settings: MeetingMonitorSettings) => {
+    try {
+      await invoke("update_meeting_monitor_settings", { settings });
+      setMeetingMonitorSettings(settings);
+    } catch (error) {
+      console.error("Failed to update meeting monitor settings:", error);
     }
   };
 
@@ -731,6 +814,71 @@ function App() {
                 )}
               </div>
 
+              {/* Auto-start Meetings */}
+              {isCalendarConnected && (
+                <div className="setting-item">
+                  <label>Auto-start transcription</label>
+                  <p className="setting-hint">Automatically start when meetings begin (like Granola)</p>
+                  <div className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={meetingMonitorSettings.enabled}
+                      onChange={(e) => handleUpdateMeetingMonitorSettings({
+                        ...meetingMonitorSettings,
+                        enabled: e.target.checked
+                      })}
+                    />
+                    <span className="toggle-track"></span>
+                  </div>
+
+                  {meetingMonitorSettings.enabled && (
+                    <div className="auto-start-options">
+                      <div className="option-row">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={meetingMonitorSettings.auto_start_on_time}
+                            onChange={(e) => handleUpdateMeetingMonitorSettings({
+                              ...meetingMonitorSettings,
+                              auto_start_on_time: e.target.checked
+                            })}
+                          />
+                          <span>Start at meeting time</span>
+                        </label>
+                      </div>
+                      <div className="option-row">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={meetingMonitorSettings.detect_meeting_apps}
+                            onChange={(e) => handleUpdateMeetingMonitorSettings({
+                              ...meetingMonitorSettings,
+                              detect_meeting_apps: e.target.checked
+                            })}
+                          />
+                          <span>Detect Zoom/Teams/Meet</span>
+                        </label>
+                      </div>
+                      <div className="option-row">
+                        <label>Buffer time:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="15"
+                          value={meetingMonitorSettings.start_buffer_minutes}
+                          onChange={(e) => handleUpdateMeetingMonitorSettings({
+                            ...meetingMonitorSettings,
+                            start_buffer_minutes: parseInt(e.target.value) || 2
+                          })}
+                          style={{ width: '60px', marginLeft: '8px' }}
+                        />
+                        <span style={{ marginLeft: '8px' }}>minutes</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Auto-suggest */}
               <div className="setting-item">
                 <label>Auto-suggest replies</label>
@@ -789,6 +937,29 @@ function App() {
             {/* Coming Up Section */}
             <div className="sidebar-section">
               <h3>Coming up</h3>
+
+              {/* Meeting Status Banner */}
+              {meetingMonitorSettings.enabled && meetingStatus?.is_meeting_detected && (
+                <div className="meeting-status-banner">
+                  {meetingStatus.meeting_app_running && (
+                    <div className="status-row">
+                      <span className="status-dot active"></span>
+                      <span className="status-text">{meetingStatus.meeting_app_running} detected</span>
+                    </div>
+                  )}
+                  {meetingStatus.upcoming_meeting && meetingStatus.minutes_until_meeting !== null && (
+                    <div className="status-row">
+                      <span>Meeting {meetingStatus.minutes_until_meeting <= 0 ? 'started' : `in ${meetingStatus.minutes_until_meeting} min`}</span>
+                    </div>
+                  )}
+                  {meetingStatus.auto_start_triggered && !isLiveTranscribing && (
+                    <div className="status-row warning">
+                      <span>Ready to auto-start!</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {isCalendarConnected ? (
                 upcomingEvents.length > 0 ? (
                   <div className="event-list">

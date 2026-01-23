@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{mpsc, watch};
 
 mod assemblyai;
@@ -12,10 +12,12 @@ mod calendar;
 mod database;
 mod deepgram;
 pub mod groq;  // Public for mock_test binary
+mod meeting_monitor;
 mod mock;
 mod realtime;
 mod screen_share;
 mod settings;
+mod system_audio;
 
 use settings::AppSettings;
 
@@ -63,6 +65,8 @@ pub struct AppState {
     pub google_client_secret: Arc<Mutex<String>>,
     // Meetings database
     pub meetings_db: Arc<Mutex<database::MeetingsDatabase>>,
+    // Meeting monitor for auto-start
+    pub meeting_monitor: Arc<meeting_monitor::MeetingMonitor>,
 }
 
 impl Default for AppState {
@@ -114,6 +118,8 @@ impl Default for AppState {
             google_client_secret: Arc::new(Mutex::new(saved_settings.google_client_secret.clone())),
             // Meetings database
             meetings_db: Arc::new(Mutex::new(database::MeetingsDatabase::load())),
+            // Meeting monitor
+            meeting_monitor: Arc::new(meeting_monitor::MeetingMonitor::new()),
         }
     }
 }
@@ -296,6 +302,9 @@ async fn start_live_transcription(
             tokio::spawn(async move {
                 // Track interim text to replace with final
                 let mut current_interim_index: Option<usize> = None;
+                // Track last few final transcripts to deduplicate
+                let mut recent_finals: Vec<String> = Vec::new();
+                const MAX_RECENT: usize = 5;
 
                 while let Some(msg) = rx.recv().await {
                     if msg.text.is_empty() {
@@ -304,16 +313,28 @@ async fn start_live_transcription(
 
                     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
 
-                    // Convert speaker ID to label
-                    // Speaker 0 = "You" (typically the first/primary speaker detected)
-                    // Speaker 1+ = "Participant" (other speakers)
-                    let speaker_label = match msg.speaker {
-                        Some(0) => "You".to_string(),
-                        Some(_) => "Participant".to_string(),
-                        None => "Speaker".to_string(),
+                    // Convert audio source to speaker label
+                    // Microphone = "You" (your voice from the mic)
+                    // SystemAudio = "Participant" (remote participants from Zoom/Meet/etc)
+                    let speaker_label = match msg.source {
+                        system_audio::AudioSource::Microphone => "You".to_string(),
+                        system_audio::AudioSource::SystemAudio => "Participant".to_string(),
                     };
 
                     if msg.is_final {
+                        // Check if this is a duplicate final transcript
+                        let cleaned_text = clean_transcript(&msg.text);
+                        if recent_finals.contains(&cleaned_text) {
+                            eprintln!("Skipping duplicate final transcript: {}", cleaned_text);
+                            continue;
+                        }
+
+                        // Add to recent finals for deduplication
+                        recent_finals.push(cleaned_text.clone());
+                        if recent_finals.len() > MAX_RECENT {
+                            recent_finals.remove(0);
+                        }
+
                         // Final transcript - add to transcription history
                         if let Ok(mut trans) = transcription_state.lock() {
                             // If we had an interim result, remove it
@@ -325,13 +346,13 @@ async fn start_live_transcription(
                             trans.push(TranscriptSegment {
                                 timestamp: timestamp.clone(),
                                 speaker: speaker_label.clone(),
-                                text: clean_transcript(&msg.text),
+                                text: cleaned_text.clone(),
                                 ..Default::default()
                             });
                         }
 
                         let _ = app_clone.emit("transcript-update", TranscriptEvent {
-                            text: msg.text,
+                            text: cleaned_text,
                             timestamp,
                             speaker: speaker_label,
                             is_final: true,
@@ -1364,6 +1385,51 @@ async fn get_past_calendar_events(state: State<'_, AppState>, days: Option<i64>,
     cal.get_past_events(days, limit).await
 }
 
+// ============== Meeting Monitor Commands ==============
+
+/// Get meeting monitor status
+#[tauri::command]
+async fn get_meeting_status(state: State<'_, AppState>) -> Result<meeting_monitor::MeetingStatus, String> {
+    Ok(state.meeting_monitor.get_status().await)
+}
+
+/// Update meeting monitor settings
+#[tauri::command]
+async fn update_meeting_monitor_settings(
+    state: State<'_, AppState>,
+    settings: meeting_monitor::MeetingMonitorSettings,
+) -> Result<(), String> {
+    state.meeting_monitor.update_settings(settings).await;
+    Ok(())
+}
+
+/// Get meeting monitor settings
+#[tauri::command]
+async fn get_meeting_monitor_settings(state: State<'_, AppState>) -> Result<meeting_monitor::MeetingMonitorSettings, String> {
+    Ok(state.meeting_monitor.get_settings().await)
+}
+
+/// Reset meeting monitor trigger (useful when manually stopping)
+#[tauri::command]
+async fn reset_meeting_monitor_trigger(state: State<'_, AppState>) -> Result<(), String> {
+    state.meeting_monitor.reset_trigger().await;
+    Ok(())
+}
+
+/// Manually check for meetings (for testing)
+#[tauri::command]
+async fn check_for_meetings_now(state: State<'_, AppState>) -> Result<bool, String> {
+    let client_id = state.google_client_id.lock().map_err(|e| e.to_string())?.clone();
+    let client_secret = state.google_client_secret.lock().map_err(|e| e.to_string())?.clone();
+
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err("Google Calendar not connected".to_string());
+    }
+
+    let cal = calendar::GoogleCalendar::new(client_id, client_secret);
+    state.meeting_monitor.check_for_meetings(&cal).await
+}
+
 // ============== Meetings Database Commands ==============
 
 /// Save current meeting to database
@@ -1474,6 +1540,65 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            // Start background task for meeting monitor
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    // Wait 30 seconds between checks
+                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+
+                    // Get app state
+                    let state = app_handle.state::<AppState>();
+
+                    // Check if meeting monitor is enabled
+                    let settings = state.meeting_monitor.get_settings().await;
+                    if !settings.enabled {
+                        continue;
+                    }
+
+                    // Get calendar credentials
+                    let client_id = state.google_client_id.lock().ok()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|| String::new());
+                    let client_secret = state.google_client_secret.lock().ok()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|| String::new());
+
+                    // Skip if calendar not connected
+                    if client_id.is_empty() || client_secret.is_empty() {
+                        continue;
+                    }
+
+                    // Check for meetings
+                    let cal = calendar::GoogleCalendar::new(client_id, client_secret);
+                    match state.meeting_monitor.check_for_meetings(&cal).await {
+                        Ok(should_auto_start) => {
+                            if should_auto_start {
+                                eprintln!("Meeting detected! Auto-starting transcription...");
+
+                                // Emit event to frontend to auto-start
+                                if let Err(e) = app_handle.emit("meeting-auto-start", ()) {
+                                    eprintln!("Failed to emit meeting-auto-start event: {}", e);
+                                }
+
+                                // Get meeting status for event details
+                                let status = state.meeting_monitor.get_status().await;
+                                if let Err(e) = app_handle.emit("meeting-status-updated", status) {
+                                    eprintln!("Failed to emit meeting-status-updated event: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error checking for meetings: {}", e);
+                        }
+                    }
+                }
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,
@@ -1512,6 +1637,12 @@ pub fn run() {
             disconnect_calendar,
             get_upcoming_events,
             get_past_calendar_events,
+            // Meeting monitor commands
+            get_meeting_status,
+            update_meeting_monitor_settings,
+            get_meeting_monitor_settings,
+            reset_meeting_monitor_trigger,
+            check_for_meetings_now,
             // Meetings database commands
             save_meeting,
             get_saved_meetings,
