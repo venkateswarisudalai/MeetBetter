@@ -1,22 +1,35 @@
-# Meeting Assistant
+# MeetBetter
 
-A powerful, privacy-focused desktop application for real-time meeting transcription with AI-powered summaries and smart reply suggestions.
+A powerful, privacy-focused desktop application for real-time meeting transcription with AI-powered summaries, dual audio capture, and calendar integration.
 
-![Meeting Assistant](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)
+![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB)
+
+> **Want to test this app?** See [TESTING.md](TESTING.md) for a quick 5-minute setup guide!
+
+## Overview
+
+MeetBetter is a production-ready desktop application built with **Tauri 2.0**, **Rust**, and **React** that transforms how meetings are transcribed and managed. It features real-time speech-to-text with sub-2-second latency, intelligent speaker separation through dual-channel audio processing, and calendar-driven automation.
+
+**Key Innovation:** Dual audio capture technology that differentiates between your microphone and system audio in real-time, solving the common problem of "who said what" in virtual meetings.
+
+**Tech Stack:** Rust (backend), React + TypeScript (frontend), Tauri 2.0 (framework), Deepgram API (transcription), Groq API (AI), SQLite (storage), WebSockets (real-time streaming)
 
 ## Features
 
 - **Real-time Transcription** - Live speech-to-text using Deepgram (1-2 second latency)
 - **Dual Audio Capture** - Separate transcription for "You" (microphone) vs "Participant" (system audio/remote speakers)
-- **Calendar Integration** - Auto-start transcription when meetings begin (Google Calendar support)
+  - Uses BlackHole virtual audio device for multichannel routing
+  - Prevents duplicate transcriptions with intelligent deduplication
+- **Calendar Integration** - Auto-start transcription when meetings begin (Google Calendar OAuth)
 - **Meeting Detection** - Automatically detects Zoom, Teams, Google Meet, Webex, Slack processes
-- **AI-Powered Summaries** - Generate meeting summaries with key points and action items
+- **AI-Powered Summaries** - Generate meeting summaries with key points, action items, and decisions
 - **Smart Reply Suggestions** - Get contextual reply suggestions based on the conversation
-- **Offline Recording** - Record meetings for later transcription
-- **Privacy First** - Your audio stays on your device, only transcription is sent to APIs
+- **Meeting Management** - Save, search, and review past meetings with full transcripts
+- **Privacy First** - Your audio stays on your device, only transcription text is sent to APIs
 - **Beautiful UI** - Modern, responsive interface with dark mode support
 - **Cross-Platform** - Works on macOS, Windows, and Linux
 
