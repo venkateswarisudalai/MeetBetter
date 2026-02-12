@@ -1,11 +1,11 @@
-# Netlify Configuration for MeetBetter Website
+# Netlify Configuration for Vantage Website
 
 [build]
-  # Publish directory (the website folder)
-  publish = "website"
+  # Publish directory (current folder when deployed from website/)
+  publish = "."
 
   # No build command needed for static HTML/CSS/JS
-  command = ""
+  command = "echo 'Static site - no build needed'"
 
 # Redirects and rewrites
 [[redirects]]
