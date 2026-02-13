@@ -438,6 +438,12 @@ p {
   margin-bottom: 48px;
 }
 
+.download-options.download-single {
+  grid-template-columns: 1fr;
+  max-width: 400px;
+  margin: 0 auto 48px;
+}
+
 .download-card {
   padding: 40px;
   background: var(--bg-white);
