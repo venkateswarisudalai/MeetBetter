@@ -518,42 +518,35 @@ p {
 }
 
 /* ===== Installation Instructions ===== */
-.install-instructions {
-  max-width: 800px;
-  margin: 48px auto 0;
-  padding: 32px;
-  background: var(--bg-light);
-  border-radius: 16px;
-  border-left: 4px solid var(--primary-start);
+.install-instructions-inline {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color);
+  text-align: left;
 }
 
-.install-instructions h3 {
-  margin-bottom: 16px;
-  color: var(--text-dark);
-}
-
-.install-instructions p {
+.install-instructions-inline .install-heading {
   color: var(--text-gray);
-  font-size: 16px;
-  margin-bottom: 16px;
+  font-size: 14px;
+  margin-bottom: 12px;
 }
 
-.install-instructions ol {
-  margin: 0 0 16px 24px;
+.install-instructions-inline ol {
+  margin: 0 0 12px 20px;
   color: var(--text-gray);
+  font-size: 14px;
 }
 
-.install-instructions li {
-  margin-bottom: 8px;
-  font-size: 16px;
+.install-instructions-inline li {
+  margin-bottom: 6px;
 }
 
-.install-instructions strong {
+.install-instructions-inline strong {
   color: var(--text-dark);
 }
 
 .install-note {
-  font-size: 14px !important;
+  font-size: 13px !important;
   color: var(--text-light) !important;
   font-style: italic;
   margin-bottom: 0 !important;
