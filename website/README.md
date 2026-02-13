@@ -1,6 +1,6 @@
-# MeetBetter Landing Page
+# Vantage Landing Page
 
-Modern, responsive landing page for MeetBetter - AI-powered meeting transcription app.
+Modern, responsive landing page for Vantage - AI-powered meeting transcription app.
 
 ## 🚀 Quick Deploy to Netlify
 
@@ -341,4 +341,4 @@ MIT License - Same as MeetBetter app
 
 ---
 
-**Built with ❤️ for MeetBetter**
+**Built with love for Vantage**

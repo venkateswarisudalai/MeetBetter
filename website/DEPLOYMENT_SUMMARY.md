@@ -1,8 +1,8 @@
-# MeetBetter Website - Deployment Summary
+# Vantage Website - Deployment Summary
 
 ## ✅ What Was Created
 
-A complete, production-ready landing page website for MeetBetter with:
+A complete, production-ready landing page website for Vantage with:
 
 ### Core Files
 - ✅ **index.html** - Full landing page with all sections
@@ -360,7 +360,7 @@ website/
 
 ## 🎉 You're Ready to Deploy!
 
-Your MeetBetter landing page is **production-ready**.
+Your Vantage landing page is **production-ready**.
 
 Choose your deployment method above and go live in minutes!
 
