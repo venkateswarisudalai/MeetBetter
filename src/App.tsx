@@ -56,6 +56,7 @@ interface StoredMeeting {
   attendees: string[];
   calendar_event_id: string | null;
   recording_path: string | null;
+  user_notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -84,8 +85,6 @@ function App() {
   // Calendar state
   const [isCalendarConnected, setIsCalendarConnected] = useState(false);
   const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
-  const [googleClientId, setGoogleClientId] = useState("");
-  const [googleClientSecret, setGoogleClientSecret] = useState("");
   const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
 
   // Meeting monitor state
@@ -114,6 +113,16 @@ function App() {
   const [screenShareSupported, setScreenShareSupported] = useState(false);
   const [suggestionsMinimized, setSuggestionsMinimized] = useState(false);
 
+  // Calendar event tracking
+  const [currentCalendarEventId, setCurrentCalendarEventId] = useState<string | null>(null);
+  const [isShareToCalendarLoading, setIsShareToCalendarLoading] = useState(false);
+
+  // Audio diagnostics state
+  const [audioMode, setAudioMode] = useState<"multichannel" | "diarize" | null>(null);
+  const [captureMethod, setCaptureMethod] = useState<string | null>(null);
+  const [systemAudioSilent, setSystemAudioSilent] = useState(false);
+  const [silenceMessage, setSilenceMessage] = useState<string | null>(null);
+
   // Recording state
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
   const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
@@ -121,6 +130,17 @@ function App() {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
+
+  // Cloud sync state
+  const [cloudSyncEnabled, setCloudSyncEnabled] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Notepad state (Granola-style)
+  const [userNotes, setUserNotes] = useState("");
+  const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
+  const [enhancedNotes, setEnhancedNotes] = useState<string | null>(null);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const notepadRef = useRef<HTMLDivElement>(null);
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
@@ -138,6 +158,7 @@ function App() {
     checkScreenShareSupport();
     checkCalendarConnection();
     loadPastMeetings();
+    checkCloudSyncStatus();
   }, []);
 
   // Load calendar events when connected
@@ -174,16 +195,34 @@ function App() {
           };
 
           setTranscription((prev) => {
+            // Find the last interim for THIS speaker (not just the last item)
+            const speaker = event.payload.speaker;
+            let lastInterimIndex = -1;
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].speaker === speaker && prev[i].is_final === false) {
+                lastInterimIndex = i;
+                break;
+              }
+              // Stop searching if we hit a final from the same speaker
+              if (prev[i].speaker === speaker && prev[i].is_final !== false) {
+                break;
+              }
+            }
+
             if (event.payload.is_final) {
-              const lastIndex = prev.length - 1;
-              if (lastIndex >= 0 && prev[lastIndex].is_final === false) {
-                return [...prev.slice(0, lastIndex), newSegment];
+              // Replace the interim for this speaker with the final
+              if (lastInterimIndex >= 0) {
+                const updated = [...prev];
+                updated[lastInterimIndex] = newSegment;
+                return updated;
               }
               return [...prev, newSegment];
             } else {
-              const lastIndex = prev.length - 1;
-              if (lastIndex >= 0 && prev[lastIndex].is_final === false) {
-                return [...prev.slice(0, lastIndex), newSegment];
+              // Replace existing interim for this speaker, or append new one
+              if (lastInterimIndex >= 0) {
+                const updated = [...prev];
+                updated[lastInterimIndex] = newSegment;
+                return updated;
               }
               return [...prev, newSegment];
             }
@@ -195,6 +234,48 @@ function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
+  }, []);
+
+  // Listen for transcript-remove events (retroactive speaker correction)
+  useEffect(() => {
+    const unlisten = listen<{ speaker: string; text: string }>(
+      "transcript-remove",
+      (event) => {
+        const { speaker, text } = event.payload;
+        setTranscription((prev) =>
+          prev.filter((seg) => !(seg.speaker === speaker && seg.text === text))
+        );
+      }
+    );
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  // Listen for audio-mode event
+  useEffect(() => {
+    const unlisten = listen<{ mode: string; system_audio_device: string; channels: number; capture_method?: string }>(
+      "audio-mode",
+      (event) => {
+        const mode = event.payload.mode as "multichannel" | "diarize";
+        setAudioMode(mode);
+        if (event.payload.capture_method) {
+          setCaptureMethod(event.payload.capture_method);
+        }
+        console.log(`Audio mode: ${mode}, capture: ${event.payload.capture_method || 'unknown'}, device: ${event.payload.system_audio_device}, channels: ${event.payload.channels}`);
+      }
+    );
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  // Listen for system-audio-silent warning
+  useEffect(() => {
+    const unlisten = listen<{ message: string }>(
+      "system-audio-silent",
+      (event) => {
+        setSystemAudioSilent(true);
+        setSilenceMessage(event.payload.message);
+      }
+    );
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
   // Auto-scroll transcript
@@ -220,7 +301,7 @@ function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) return;
 
       const keyNum = parseInt(e.key);
       if (keyNum >= 1 && keyNum <= 4 && suggestedReplies.length >= keyNum) {
@@ -249,6 +330,10 @@ function App() {
   useEffect(() => {
     const unlisten = listen("meeting-auto-start", () => {
       console.log("Meeting auto-start triggered!");
+      // Capture calendar event ID from meeting status
+      if (meetingStatus?.upcoming_meeting?.id) {
+        setCurrentCalendarEventId(meetingStatus.upcoming_meeting.id);
+      }
       // Auto-start live transcription
       if (!isLiveTranscribing && hasDeepgramKey) {
         handleStartLiveTranscription();
@@ -338,6 +423,37 @@ function App() {
     }
   };
 
+  const checkCloudSyncStatus = async () => {
+    try {
+      const status = await invoke<{ is_configured: boolean; is_enabled: boolean }>("get_cloud_sync_status");
+      setCloudSyncEnabled(status.is_enabled);
+    } catch (error) {
+      console.error("Failed to check cloud sync status:", error);
+    }
+  };
+
+  const handleToggleCloudSync = async (enabled: boolean) => {
+    try {
+      await invoke("toggle_cloud_sync", { enabled });
+      setCloudSyncEnabled(enabled);
+    } catch (error) {
+      console.error("Failed to toggle cloud sync:", error);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setIsSyncing(true);
+    try {
+      const synced = await invoke<number>("sync_meetings_to_cloud");
+      alert(`Synced ${synced} meetings to cloud.`);
+    } catch (error) {
+      console.error("Failed to sync meetings:", error);
+      alert("Failed to sync: " + error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSaveGroqKey = async () => {
     if (!groqKeyInput.trim()) return;
     setIsLoading(true);
@@ -373,24 +489,16 @@ function App() {
   };
 
   const handleConnectCalendar = async () => {
-    if (!googleClientId.trim() || !googleClientSecret.trim()) {
-      alert("Please enter Google Client ID and Secret");
-      return;
-    }
-
     setIsConnectingCalendar(true);
     try {
-      await invoke("set_google_credentials", {
-        clientId: googleClientId.trim(),
-        clientSecret: googleClientSecret.trim(),
-      });
-
       const authUrl = await invoke<string>("get_google_auth_url");
+
+      // Start the local callback server FIRST, then open the browser
+      const callbackPromise = invoke<string>("wait_for_oauth_callback");
       await openUrl(authUrl);
 
-      // Show instructions
-      alert("A browser window will open. After authorizing, copy the code from the URL and paste it here.");
-      const code = prompt("Paste the authorization code:");
+      // Wait for the OAuth callback (server captures the code automatically)
+      const code = await callbackPromise;
 
       if (code) {
         await invoke("exchange_google_code", { code: code.trim() });
@@ -449,6 +557,10 @@ function App() {
       await invoke("start_live_transcription");
       setIsLiveTranscribing(true);
       setSuggestedReplies([]);
+      setAudioMode(null);
+      setCaptureMethod(null);
+      setSystemAudioSilent(false);
+      setSilenceMessage(null);
       lastTranscriptCount.current = 0;
       lastReplyGenerationTime.current = 0;
     } catch (error) {
@@ -547,6 +659,21 @@ function App() {
     }
   };
 
+  const handleEnhanceNotes = async () => {
+    if (!userNotes.trim() || !hasGroqKey) return;
+    setIsEnhancing(true);
+    try {
+      const result = await invoke<string>("enhance_notes", {
+        userNotes: userNotes.trim(),
+      });
+      setEnhancedNotes(result);
+    } catch (error) {
+      console.error("Failed to enhance notes:", error);
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
   const handleClearAll = async () => {
     try {
       await invoke("clear_transcription");
@@ -555,6 +682,9 @@ function App() {
       setStructuredSummary(null);
       setSuggestedReplies([]);
       setSavedRecordingPath(null);
+      setUserNotes("");
+      setEnhancedNotes(null);
+      setCurrentCalendarEventId(null);
       setViewMode('home');
     } catch (error) {
       console.error("Failed to clear:", error);
@@ -583,10 +713,11 @@ function App() {
       const meetingId = await invoke<string>("save_meeting", {
         title,
         attendees: [],
-        calendar_event_id: null,
+        calendar_event_id: currentCalendarEventId,
         duration_seconds: recordingTime > 0 ? recordingTime : null,
         transcript: cleanTranscript,
         summary: structuredSummary,
+        user_notes: userNotes.trim() || null,
       });
       console.log("Meeting saved with ID:", meetingId);
 
@@ -632,7 +763,7 @@ function App() {
     if (!confirm("Are you sure you want to delete this meeting?")) return;
     try {
       await invoke("delete_meeting", { id });
-      loadPastMeetings();
+      await loadPastMeetings();
       if (selectedMeeting?.id === id) {
         setSelectedMeeting(null);
         setViewMode('home');
@@ -659,6 +790,52 @@ function App() {
       invoke("set_meeting_context", { context: preset.context }).then(() => {
         setMeetingContext(preset.context);
       });
+    }
+  };
+
+  const formatSummaryForCalendar = (summary: MeetingSummary | null, notes: string): string => {
+    const parts: string[] = [];
+    parts.push("=== Meeting Summary (Vantage) ===\n");
+
+    if (notes.trim()) {
+      parts.push("NOTES:\n" + notes.trim() + "\n");
+    }
+
+    if (summary) {
+      if (summary.key_points?.length > 0) {
+        parts.push("KEY POINTS:");
+        summary.key_points.forEach(p => parts.push("- " + p));
+        parts.push("");
+      }
+      if (summary.action_items?.length > 0) {
+        parts.push("ACTION ITEMS:");
+        summary.action_items.forEach(p => parts.push("- " + p));
+        parts.push("");
+      }
+      if (summary.decisions?.length > 0) {
+        parts.push("DECISIONS:");
+        summary.decisions.forEach(p => parts.push("- " + p));
+        parts.push("");
+      }
+    }
+
+    return parts.join("\n");
+  };
+
+  const handleShareToCalendar = async (eventId: string, summary: MeetingSummary | null, notes: string) => {
+    setIsShareToCalendarLoading(true);
+    try {
+      const description = formatSummaryForCalendar(summary, notes);
+      await invoke("update_calendar_event_description", {
+        eventId,
+        description,
+      });
+      alert("Meeting summary shared to Google Calendar event!");
+    } catch (error) {
+      console.error("Failed to share to calendar:", error);
+      alert("Failed to share to calendar: " + error);
+    } finally {
+      setIsShareToCalendarLoading(false);
     }
   };
 
@@ -800,29 +977,12 @@ function App() {
                     <button className="text-btn danger" onClick={handleDisconnectCalendar}>Disconnect</button>
                   </div>
                 ) : (
-                  <div className="calendar-setup">
-                    <input
-                      type="text"
-                      placeholder="Google Client ID"
-                      value={googleClientId}
-                      onChange={(e) => setGoogleClientId(e.target.value)}
-                    />
-                    <input
-                      type="password"
-                      placeholder="Google Client Secret"
-                      value={googleClientSecret}
-                      onChange={(e) => setGoogleClientSecret(e.target.value)}
-                    />
-                    <button
-                      onClick={handleConnectCalendar}
-                      disabled={isConnectingCalendar || !googleClientId.trim() || !googleClientSecret.trim()}
-                    >
-                      {isConnectingCalendar ? "Connecting..." : "Connect Calendar"}
-                    </button>
-                    <span className="help-link" onClick={() => openUrl("https://console.cloud.google.com/apis/credentials")}>
-                      Get Google credentials (free) →
-                    </span>
-                  </div>
+                  <button
+                    onClick={handleConnectCalendar}
+                    disabled={isConnectingCalendar}
+                  >
+                    {isConnectingCalendar ? "Connecting..." : "Connect Calendar"}
+                  </button>
                 )}
               </div>
 
@@ -890,6 +1050,37 @@ function App() {
                   )}
                 </div>
               )}
+
+              {/* Cloud Sync */}
+              <div className="setting-item">
+                <label>Cloud Sync</label>
+                <p className="setting-hint">Backup meetings to the cloud automatically</p>
+                <div>
+                  <div className="api-status">
+                    <span className={`status-dot ${cloudSyncEnabled ? 'connected' : ''}`}></span>
+                    <span>{cloudSyncEnabled ? 'Enabled' : 'Disabled'}</span>
+                    <div className="toggle" style={{ marginLeft: 'auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={cloudSyncEnabled}
+                        onChange={(e) => handleToggleCloudSync(e.target.checked)}
+                      />
+                      <span className="toggle-track"></span>
+                    </div>
+                  </div>
+                  {cloudSyncEnabled && (
+                    <div style={{ marginTop: '10px' }}>
+                      <button
+                        className="text-btn"
+                        onClick={handleSyncNow}
+                        disabled={isSyncing}
+                      >
+                        {isSyncing ? "Syncing..." : "Sync Now"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Auto-suggest */}
               <div className="setting-item">
@@ -1036,9 +1227,29 @@ function App() {
             {!(hasGroqKey || hasDeepgramKey) ? (
               <div className="setup-prompt">
                 <h1>Welcome to Vantage</h1>
-                <p>Add your API keys to get started</p>
+                <p>Real-time meeting transcription with AI summaries</p>
+                <div className="setup-steps">
+                  <div className={`setup-step ${hasDeepgramKey ? 'done' : ''}`}>
+                    <span className="step-number">1</span>
+                    <div className="step-content">
+                      <strong>Deepgram</strong> — Real-time transcription
+                      <span className="help-link" onClick={() => openUrl("https://console.deepgram.com/")}>
+                        Get free key (includes $200 credit) →
+                      </span>
+                    </div>
+                  </div>
+                  <div className={`setup-step ${hasGroqKey ? 'done' : ''}`}>
+                    <span className="step-number">2</span>
+                    <div className="step-content">
+                      <strong>Groq</strong> — AI summaries &amp; suggestions
+                      <span className="help-link" onClick={() => openUrl("https://console.groq.com/keys")}>
+                        Get free key →
+                      </span>
+                    </div>
+                  </div>
+                </div>
                 <button className="primary-btn large" onClick={() => setShowSettings(true)}>
-                  Open Settings
+                  Enter API Keys
                 </button>
               </div>
             ) : (
@@ -1087,6 +1298,25 @@ function App() {
               ← Back
             </button>
             <h2>{selectedMeeting.title}</h2>
+            {isCalendarConnected && selectedMeeting.calendar_event_id && (
+              <button
+                className="text-btn"
+                onClick={() => handleShareToCalendar(
+                  selectedMeeting.calendar_event_id!,
+                  selectedMeeting.summary ? {
+                    key_points: selectedMeeting.summary.key_points,
+                    action_items: selectedMeeting.summary.action_items,
+                    decisions: selectedMeeting.summary.decisions,
+                    notes: selectedMeeting.summary.notes,
+                    raw_summary: selectedMeeting.summary.raw_summary || "",
+                  } : null,
+                  selectedMeeting.user_notes || ""
+                )}
+                disabled={isShareToCalendarLoading}
+              >
+                {isShareToCalendarLoading ? "Sharing..." : "Share to Calendar"}
+              </button>
+            )}
             <button className="icon-btn danger" onClick={() => handleDeleteMeeting(selectedMeeting.id)} title="Delete">
               🗑️
             </button>
@@ -1102,6 +1332,14 @@ function App() {
                 <span>Attendees: {selectedMeeting.attendees.join(', ')}</span>
               )}
             </div>
+
+            {/* User Notes */}
+            {selectedMeeting.user_notes && (
+              <section className="detail-section">
+                <h3>Notes</h3>
+                <div className="user-note-text">{selectedMeeting.user_notes}</div>
+              </section>
+            )}
 
             {/* Summary */}
             {selectedMeeting.summary && (
@@ -1144,93 +1382,139 @@ function App() {
         </div>
       )}
 
-      {/* RECORDING STATE */}
+      {/* RECORDING STATE - Granola-style notepad + transcript */}
       {appState === 'recording' && (
         <div className="recording-screen">
           <header className="recording-header">
             <div className="recording-status">
-              <span className="rec-dot"></span>
-              <span className="rec-time">{formatTime(recordingTime)}</span>
-              <div className="audio-waveform">
-                <span className="bar"></span>
-                <span className="bar"></span>
-                <span className="bar"></span>
-                <span className="bar"></span>
+              <div className="green-bars">
+                <span className="gbar"></span>
+                <span className="gbar"></span>
+                <span className="gbar"></span>
+                <span className="gbar"></span>
               </div>
+              <span className="rec-time">{formatTime(recordingTime)}</span>
+              {audioMode && (
+                <span className={`audio-mode-badge ${audioMode}`}>
+                  {audioMode === "multichannel"
+                    ? (captureMethod === "ScreenCaptureKit" ? "SCK Stereo" : "Stereo")
+                    : "Diarize"}
+                </span>
+              )}
             </div>
-            <button className="stop-btn" onClick={() => {
-              if (isLiveTranscribing) handleStopLiveTranscription();
-              else if (isMockTranscribing) handleMockTranscription();
-            }}>
-              Stop
-            </button>
+            <div className="recording-header-actions">
+              <button
+                className="transcript-toggle"
+                onClick={() => setShowTranscriptPanel(!showTranscriptPanel)}
+                title={showTranscriptPanel ? 'Hide transcript' : 'Show transcript'}
+              >
+                {showTranscriptPanel ? 'Hide Transcript' : 'Show Transcript'}
+              </button>
+              <button className="stop-btn" onClick={() => {
+                if (isLiveTranscribing) handleStopLiveTranscription();
+                else if (isMockTranscribing) handleMockTranscription();
+              }}>
+                Stop
+              </button>
+            </div>
           </header>
 
-          <main className="transcript-main">
-            {transcription.length === 0 ? (
-              <div className="empty-transcript"><p>Listening...</p></div>
-            ) : (
-              <div className="transcript-list chat-style">
-                {transcription.map((seg, i) => (
-                  <div key={i} className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'} ${seg.is_final === false ? 'interim' : ''}`}>
-                    <div className="message-bubble">
-                      <span className="speaker-label">{seg.speaker}</span>
-                      <p>{seg.text}</p>
-                      {seg.is_final === false && <span className="interim-badge">...</span>}
-                    </div>
-                  </div>
-                ))}
-                <div ref={transcriptionEndRef} />
-              </div>
-            )}
-          </main>
+          {systemAudioSilent && (
+            <div className="silence-warning-banner">
+              <span className="silence-warning-text">
+                {silenceMessage || "System audio is silent. Check that Screen Recording permission is granted in System Settings > Privacy & Security."}
+              </span>
+              <button className="silence-warning-dismiss" onClick={() => setSystemAudioSilent(false)}>Dismiss</button>
+            </div>
+          )}
 
-          {/* Collapsible Suggestions Panel */}
-          {autoGenerateReplies && (
-            <div className={`suggestions-panel ${suggestionsMinimized ? 'minimized' : ''}`}>
-              <div className="suggestions-header">
-                <span className="suggestions-title">
-                  {isGeneratingReplies ? 'Generating...' : 'Suggested Replies'}
-                </span>
-                <button
-                  className="minimize-btn"
-                  onClick={() => setSuggestionsMinimized(!suggestionsMinimized)}
-                  title={suggestionsMinimized ? 'Expand' : 'Minimize'}
-                >
-                  {suggestionsMinimized ? '↑' : '−'}
-                </button>
-              </div>
-              {!suggestionsMinimized && (
-                <div className="suggestions-content">
-                  {suggestedReplies.length > 0 ? (
-                    <div className="reply-list">
-                      {suggestedReplies.map((reply, i) => (
-                        <div
-                          key={i}
-                          className={`reply-item ${copiedIndex === i ? 'copied' : ''}`}
-                          onClick={() => handleCopyReply(reply, i)}
-                        >
-                          <span className="reply-key">{i + 1}</span>
-                          <span className="reply-text">{reply}</span>
-                          <span className="copy-hint">{copiedIndex === i ? 'Copied!' : 'Click to copy'}</span>
+          <div className="recording-body">
+            {/* Notepad Panel (left) */}
+            <div className={`notepad-panel ${!showTranscriptPanel ? 'full-width' : ''}`}>
+              <div
+                ref={notepadRef}
+                className="notepad-editor"
+                contentEditable
+                suppressContentEditableWarning
+                data-placeholder="Take notes during the meeting..."
+                onInput={(e) => setUserNotes((e.target as HTMLDivElement).innerText)}
+              />
+              {/* Inline Suggestions Panel */}
+              {autoGenerateReplies && (
+                <div className={`suggestions-inline ${suggestionsMinimized ? 'minimized' : ''}`}>
+                  <div className="suggestions-header">
+                    <span className="suggestions-title">
+                      {isGeneratingReplies ? 'Generating...' : 'Suggested Replies'}
+                    </span>
+                    <button
+                      className="minimize-btn"
+                      onClick={() => setSuggestionsMinimized(!suggestionsMinimized)}
+                      title={suggestionsMinimized ? 'Expand' : 'Minimize'}
+                    >
+                      {suggestionsMinimized ? '↑' : '−'}
+                    </button>
+                  </div>
+                  {!suggestionsMinimized && (
+                    <div className="suggestions-content">
+                      {suggestedReplies.length > 0 ? (
+                        <div className="reply-list">
+                          {suggestedReplies.map((reply, i) => (
+                            <div
+                              key={i}
+                              className={`reply-item ${copiedIndex === i ? 'copied' : ''}`}
+                              onClick={() => handleCopyReply(reply, i)}
+                            >
+                              <span className="reply-key">{i + 1}</span>
+                              <span className="reply-text">{reply}</span>
+                              <span className="copy-hint">{copiedIndex === i ? 'Copied!' : 'Click to copy'}</span>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-suggestions">
-                      {isGeneratingReplies ? (
-                        <p>Analyzing conversation...</p>
-                      ) : replyError ? (
-                        <p className="error">{replyError}</p>
                       ) : (
-                        <p>Suggestions will appear as the conversation progresses</p>
+                        <div className="empty-suggestions">
+                          {isGeneratingReplies ? (
+                            <p>Analyzing conversation...</p>
+                          ) : replyError ? (
+                            <p className="error">{replyError}</p>
+                          ) : (
+                            <p>Suggestions will appear as the conversation progresses</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
               )}
             </div>
-          )}
+
+            {/* Live Transcript Panel (right) */}
+            {showTranscriptPanel && (
+              <div className="transcript-panel-right">
+                <div className="transcript-panel-header">
+                  <span>Live Transcript</span>
+                </div>
+                <div className="transcript-panel-body">
+                  {transcription.length === 0 ? (
+                    <div className="empty-transcript"><p>Listening...</p></div>
+                  ) : (
+                    <div className="transcript-list chat-style">
+                      {transcription.map((seg, i) => (
+                        <div key={i} className={`transcript-item ${seg.speaker === 'You' ? 'you' : 'participant'} ${seg.is_final === false ? 'interim' : ''}`}>
+                          <div className="message-bubble">
+                            <span className={`speaker-label ${seg.speaker.startsWith('Speaker') ? 'diarized' : ''}`}>{seg.speaker}</span>
+                            <p>{seg.text}</p>
+                            {seg.is_final === false && <span className="interim-badge">...</span>}
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={transcriptionEndRef} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
         </div>
       )}
 
@@ -1245,12 +1529,61 @@ function App() {
                 setSaveMeetingTitle("Meeting " + new Date().toLocaleDateString());
                 setShowSaveMeetingModal(true);
               }}>Save Meeting</button>
+              {isCalendarConnected && currentCalendarEventId && (
+                <button
+                  className="text-btn"
+                  onClick={() => handleShareToCalendar(currentCalendarEventId, structuredSummary, userNotes)}
+                  disabled={isShareToCalendarLoading}
+                >
+                  {isShareToCalendarLoading ? "Sharing..." : "Share to Calendar"}
+                </button>
+              )}
               <button className="text-btn" onClick={handleClearAll}>New Meeting</button>
               <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
             </div>
           </header>
 
           <main className="done-content">
+            {/* User Notes Section */}
+            {userNotes.trim() && (
+              <section className="user-notes-section">
+                <div className="section-title">
+                  <h2>Your Notes</h2>
+                  <button
+                    className="enhance-btn"
+                    onClick={handleEnhanceNotes}
+                    disabled={isEnhancing}
+                  >
+                    {isEnhancing ? "Enhancing..." : "Enhance with AI"}
+                  </button>
+                </div>
+                <div className="user-note-text">{userNotes}</div>
+              </section>
+            )}
+
+            {/* Enhanced Notes Section */}
+            {enhancedNotes && (
+              <section className="enhanced-notes">
+                <h2>Enhanced Notes</h2>
+                <div className="enhanced-notes-content">
+                  {enhancedNotes.split('\n').map((line, i) => {
+                    const trimmed = line.trim();
+                    if (!trimmed) return <br key={i} />;
+                    if (trimmed.startsWith('[USER]')) {
+                      return <p key={i} className="user-note-line">{trimmed.replace('[USER]', '').trim()}</p>;
+                    }
+                    if (trimmed.startsWith('[AI]')) {
+                      return <p key={i} className="ai-note-line">{trimmed.replace('[AI]', '').trim()}</p>;
+                    }
+                    if (trimmed.startsWith('#')) {
+                      return <h3 key={i} className="enhanced-section-heading">{trimmed.replace(/^#+\s*/, '')}</h3>;
+                    }
+                    return <p key={i} className="ai-note-line">{trimmed}</p>;
+                  })}
+                </div>
+              </section>
+            )}
+
             {/* Summary Section */}
             <section className="summary-section-main">
               <div className="section-title">

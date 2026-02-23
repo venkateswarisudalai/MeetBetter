@@ -2,12 +2,18 @@ use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{WavSpec, WavWriter};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::path::PathBuf;
 
+use crate::system_audio::{
+    get_system_audio_backend, SystemAudioCaptureMethod,
+    start_screencapturekit_capture,
+};
+
 // We need to handle the Stream in a separate thread since cpal::Stream is not Send
 pub struct AudioRecorder {
-    stop_signal: Arc<Mutex<bool>>,
+    stop_signal: Arc<AtomicBool>,
     output_path: String,
     thread_handle: Option<thread::JoinHandle<Result<()>>>,
 }
@@ -30,11 +36,22 @@ impl AudioRecorder {
         let host = cpal::default_host();
 
         // Try to get the default input device (microphone)
-        let device = host
+        let mic_device = host
             .default_input_device()
             .ok_or_else(|| anyhow!("No input device available"))?;
 
-        let config = device.default_input_config()?;
+        let mic_config = mic_device.default_input_config()?;
+        let sample_rate = mic_config.sample_rate().0;
+
+        // Determine system audio capture method
+        let capture_method = get_system_audio_backend();
+        let has_system_audio = capture_method != SystemAudioCaptureMethod::None;
+        let wav_channels: u16 = if has_system_audio { 2 } else { 1 };
+
+        eprintln!(
+            "AudioRecorder: sample_rate={}, channels={}, capture_method={}",
+            sample_rate, wav_channels, capture_method
+        );
 
         // Create output file path in Documents/MeetingRecordings
         let recordings_folder = get_recordings_folder()?;
@@ -45,13 +62,13 @@ impl AudioRecorder {
             .to_string();
 
         let spec = WavSpec {
-            channels: config.channels(),
-            sample_rate: config.sample_rate().0,
+            channels: wav_channels,
+            sample_rate,
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         };
 
-        let stop_signal = Arc::new(Mutex::new(false));
+        let stop_signal = Arc::new(AtomicBool::new(false));
         let stop_signal_clone = stop_signal.clone();
         let output_path_clone = output_path.clone();
 
@@ -59,72 +76,214 @@ impl AudioRecorder {
         let thread_handle = thread::spawn(move || -> Result<()> {
             let writer = WavWriter::create(&output_path_clone, spec)?;
             let writer = Arc::new(Mutex::new(Some(writer)));
-            let writer_clone = writer.clone();
 
-            let err_fn = |err| eprintln!("Audio stream error: {}", err);
+            if has_system_audio {
+                // STEREO MODE: capture mic + system audio, interleave into WAV
+                let mic_buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
+                let system_buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
 
-            let stream = match config.sample_format() {
-                cpal::SampleFormat::F32 => device.build_input_stream(
-                    &config.into(),
+                // Build mic stream
+                let mic_buffer_clone = mic_buffer.clone();
+                let mic_stream_config = cpal::StreamConfig {
+                    channels: 1,
+                    sample_rate: cpal::SampleRate(sample_rate),
+                    buffer_size: cpal::BufferSize::Default,
+                };
+
+                let mic_stream = mic_device.build_input_stream(
+                    &mic_stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        if let Ok(mut writer_guard) = writer_clone.lock() {
-                            if let Some(ref mut writer) = *writer_guard {
-                                for &sample in data {
-                                    let sample_i16 = (sample * i16::MAX as f32) as i16;
-                                    let _ = writer.write_sample(sample_i16);
-                                }
-                            }
+                        let samples: Vec<i16> = data
+                            .iter()
+                            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+                            .collect();
+                        if let Ok(mut buf) = mic_buffer_clone.lock() {
+                            buf.extend(samples);
                         }
                     },
-                    err_fn,
+                    |err| eprintln!("Mic stream error: {}", err),
                     None,
-                )?,
-                cpal::SampleFormat::I16 => device.build_input_stream(
-                    &config.into(),
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        if let Ok(mut writer_guard) = writer_clone.lock() {
-                            if let Some(ref mut writer) = *writer_guard {
-                                for &sample in data {
-                                    let _ = writer.write_sample(sample);
-                                }
-                            }
-                        }
-                    },
-                    err_fn,
-                    None,
-                )?,
-                cpal::SampleFormat::U16 => device.build_input_stream(
-                    &config.into(),
-                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        if let Ok(mut writer_guard) = writer_clone.lock() {
-                            if let Some(ref mut writer) = *writer_guard {
-                                for &sample in data {
-                                    let sample_i16 = (sample as i32 - 32768) as i16;
-                                    let _ = writer.write_sample(sample_i16);
-                                }
-                            }
-                        }
-                    },
-                    err_fn,
-                    None,
-                )?,
-                _ => return Err(anyhow!("Unsupported sample format")),
-            };
+                );
 
-            stream.play()?;
+                // Start system audio capture
+                let system_stream = match capture_method {
+                    SystemAudioCaptureMethod::ScreenCaptureKit => {
+                        match start_screencapturekit_capture(
+                            system_buffer.clone(),
+                            sample_rate,
+                            stop_signal_clone.clone(),
+                        ) {
+                            Ok(()) => eprintln!("AudioRecorder: ScreenCaptureKit capture active"),
+                            Err(e) => eprintln!("AudioRecorder: ScreenCaptureKit failed: {}. System audio channel will be silent.", e),
+                        }
+                        None
+                    }
+                    SystemAudioCaptureMethod::BlackHole => {
+                        let system_buffer_clone = system_buffer.clone();
+                        match crate::system_audio::get_blackhole_device() {
+                            Some(sys_device) => {
+                                let sys_config = cpal::StreamConfig {
+                                    channels: 2,
+                                    sample_rate: cpal::SampleRate(sample_rate),
+                                    buffer_size: cpal::BufferSize::Default,
+                                };
+                                match sys_device.build_input_stream(
+                                    &sys_config,
+                                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                                        let samples: Vec<i16> = data
+                                            .chunks(2)
+                                            .map(|chunk| {
+                                                let left = chunk.first().copied().unwrap_or(0.0);
+                                                let right = chunk.get(1).copied().unwrap_or(0.0);
+                                                let mono = (left + right) / 2.0;
+                                                (mono.clamp(-1.0, 1.0) * 32767.0) as i16
+                                            })
+                                            .collect();
+                                        if let Ok(mut buf) = system_buffer_clone.lock() {
+                                            buf.extend(samples);
+                                        }
+                                    },
+                                    |err| eprintln!("System audio stream error: {}", err),
+                                    None,
+                                ) {
+                                    Ok(stream) => Some(stream),
+                                    Err(e) => {
+                                        eprintln!("Failed to build BlackHole stream: {}", e);
+                                        None
+                                    }
+                                }
+                            }
+                            None => {
+                                eprintln!("AudioRecorder: BlackHole device not found");
+                                None
+                            }
+                        }
+                    }
+                    SystemAudioCaptureMethod::None => None,
+                };
 
-            // Keep recording until stop signal
-            loop {
-                if let Ok(stop) = stop_signal_clone.lock() {
-                    if *stop {
-                        break;
+                // Start streams
+                if let Ok(ref stream) = mic_stream {
+                    let _ = stream.play();
+                    eprintln!("AudioRecorder: Mic capture started (Channel 0 = You)");
+                }
+                if let Some(ref stream) = system_stream {
+                    let _ = stream.play();
+                    eprintln!("AudioRecorder: System audio capture started (Channel 1 = Participant)");
+                }
+
+                let samples_per_100ms = sample_rate as usize / 10;
+
+                // Main loop: interleave mic + system audio and write to WAV
+                while !stop_signal_clone.load(Ordering::SeqCst) {
+                    thread::sleep(std::time::Duration::from_millis(50));
+
+                    let mic_samples: Vec<i16>;
+                    let system_samples: Vec<i16>;
+
+                    // Get mic samples
+                    {
+                        let mut buf = mic_buffer.lock().unwrap();
+                        if buf.len() >= samples_per_100ms {
+                            mic_samples = buf.drain(..samples_per_100ms).collect();
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    // Get system samples
+                    {
+                        let mut buf = system_buffer.lock().unwrap();
+                        if buf.len() >= samples_per_100ms {
+                            system_samples = buf.drain(..samples_per_100ms).collect();
+                        } else {
+                            // Pad with silence if system audio is behind
+                            system_samples = vec![0i16; samples_per_100ms];
+                        }
+                    }
+
+                    // Write interleaved stereo samples to WAV
+                    // Channel 0 (left) = Microphone = You
+                    // Channel 1 (right) = System Audio = Participant
+                    if let Ok(mut writer_guard) = writer.lock() {
+                        if let Some(ref mut w) = *writer_guard {
+                            for i in 0..samples_per_100ms {
+                                let mic_sample = mic_samples.get(i).copied().unwrap_or(0);
+                                let sys_sample = system_samples.get(i).copied().unwrap_or(0);
+                                let _ = w.write_sample(mic_sample);
+                                let _ = w.write_sample(sys_sample);
+                            }
+                        }
                     }
                 }
-                thread::sleep(std::time::Duration::from_millis(100));
-            }
 
-            // Stop the stream
-            drop(stream);
+                // Streams are dropped here when they go out of scope
+                drop(mic_stream);
+                drop(system_stream);
+            } else {
+                // MONO MODE: Just capture mic (original behavior)
+                let writer_clone = writer.clone();
+
+                let err_fn = |err| eprintln!("Audio stream error: {}", err);
+
+                let stream = match mic_config.sample_format() {
+                    cpal::SampleFormat::F32 => mic_device.build_input_stream(
+                        &mic_config.into(),
+                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            if let Ok(mut writer_guard) = writer_clone.lock() {
+                                if let Some(ref mut writer) = *writer_guard {
+                                    for &sample in data {
+                                        let sample_i16 = (sample * i16::MAX as f32) as i16;
+                                        let _ = writer.write_sample(sample_i16);
+                                    }
+                                }
+                            }
+                        },
+                        err_fn,
+                        None,
+                    )?,
+                    cpal::SampleFormat::I16 => mic_device.build_input_stream(
+                        &mic_config.into(),
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            if let Ok(mut writer_guard) = writer_clone.lock() {
+                                if let Some(ref mut writer) = *writer_guard {
+                                    for &sample in data {
+                                        let _ = writer.write_sample(sample);
+                                    }
+                                }
+                            }
+                        },
+                        err_fn,
+                        None,
+                    )?,
+                    cpal::SampleFormat::U16 => mic_device.build_input_stream(
+                        &mic_config.into(),
+                        move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                            if let Ok(mut writer_guard) = writer_clone.lock() {
+                                if let Some(ref mut writer) = *writer_guard {
+                                    for &sample in data {
+                                        let sample_i16 = (sample as i32 - 32768) as i16;
+                                        let _ = writer.write_sample(sample_i16);
+                                    }
+                                }
+                            }
+                        },
+                        err_fn,
+                        None,
+                    )?,
+                    _ => return Err(anyhow!("Unsupported sample format")),
+                };
+
+                stream.play()?;
+
+                // Keep recording until stop signal
+                while !stop_signal_clone.load(Ordering::SeqCst) {
+                    thread::sleep(std::time::Duration::from_millis(100));
+                }
+
+                // Stop the stream
+                drop(stream);
+            }
 
             // Finalize the WAV file
             if let Ok(mut writer_guard) = writer.lock() {
@@ -133,6 +292,7 @@ impl AudioRecorder {
                 }
             }
 
+            eprintln!("AudioRecorder: recording thread ended");
             Ok(())
         });
 
@@ -149,9 +309,7 @@ impl AudioRecorder {
 
     pub fn stop(mut self) -> Result<String> {
         // Signal the recording thread to stop
-        if let Ok(mut stop) = self.stop_signal.lock() {
-            *stop = true;
-        }
+        self.stop_signal.store(true, Ordering::SeqCst);
 
         // Wait for the thread to finish
         if let Some(handle) = self.thread_handle.take() {

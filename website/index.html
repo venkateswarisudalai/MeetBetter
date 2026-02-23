@@ -3,29 +3,34 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vantage - AI-Powered Meeting Transcription</title>
+  <title>Vantage - AI Meeting Assistant</title>
 
   <!-- SEO Meta Tags -->
-  <meta name="description" content="Transform your meetings with AI-powered real-time transcription, intelligent summaries, and actionable insights. Free, open-source, and privacy-first.">
+  <meta name="description" content="Never lose a meeting insight again. Vantage captures real-time transcripts, generates AI summaries, and keeps everything private on your device.">
   <meta name="keywords" content="meeting transcription, AI transcription, meeting notes, real-time transcription, Zoom transcription, Google Meet transcription">
   <meta name="author" content="Vantage">
 
   <!-- Open Graph / Social Media -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://vantage-meeting-app.netlify.app/">
-  <meta property="og:title" content="Vantage - AI-Powered Meeting Transcription">
-  <meta property="og:description" content="Real-time transcription, intelligent summaries, and actionable insights for every meeting.">
+  <meta property="og:title" content="Vantage - AI Meeting Assistant">
+  <meta property="og:description" content="Never lose a meeting insight again. Real-time transcription and AI summaries, all on-device.">
   <meta property="og:image" content="https://vantage-meeting-app.netlify.app/images/og-image.png">
 
   <!-- Twitter -->
   <meta property="twitter:card" content="summary_large_image">
   <meta property="twitter:url" content="https://vantage-meeting-app.netlify.app/">
-  <meta property="twitter:title" content="Vantage - AI-Powered Meeting Transcription">
-  <meta property="twitter:description" content="Real-time transcription, intelligent summaries, and actionable insights for every meeting.">
+  <meta property="twitter:title" content="Vantage - AI Meeting Assistant">
+  <meta property="twitter:description" content="Never lose a meeting insight again. Real-time transcription and AI summaries, all on-device.">
   <meta property="twitter:image" content="https://vantage-meeting-app.netlify.app/images/og-image.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="/images/logo.svg">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Stylesheets -->
   <link rel="stylesheet" href="css/styles.css">
@@ -36,15 +41,12 @@
   <nav class="navbar">
     <div class="container">
       <div class="nav-content">
-        <a href="#" class="logo">
-          <span class="logo-icon">🎯</span>
-          <span class="logo-text">Vantage</span>
-        </a>
+        <a href="#" class="logo">Vantage</a>
         <ul class="nav-links">
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How It Works</a></li>
-          <li><a href="#download">Download</a></li>
           <li><a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a></li>
+          <li><a href="#download" class="nav-cta">Download</a></li>
         </ul>
         <button class="mobile-menu-toggle" aria-label="Toggle menu">
           <span></span>
@@ -59,53 +61,12 @@
   <section class="hero" id="hero">
     <div class="container">
       <div class="hero-content">
-        <div class="hero-text">
-          <h1 class="hero-title">Transform Your Meetings with AI-Powered Transcription</h1>
-          <p class="hero-subtitle">Real-time transcription, intelligent summaries, and actionable insights for every meeting. Free, open-source, and privacy-first.</p>
-          <div class="hero-ctas">
-            <a href="#download" class="btn btn-primary" id="primary-download-btn">
-              <span class="btn-icon">⬇️</span>
-              <span class="btn-text">Download for macOS</span>
-            </a>
-            <a href="https://github.com/venkateswarisudalai/MeetBetter" class="btn btn-secondary" target="_blank">
-              <span class="btn-icon">⭐</span>
-              <span class="btn-text">Star on GitHub</span>
-            </a>
-          </div>
-          <div class="hero-stats">
-            <div class="stat">
-              <div class="stat-number">100%</div>
-              <div class="stat-label">Free & Open Source</div>
-            </div>
-            <div class="stat">
-              <div class="stat-number">Private</div>
-              <div class="stat-label">All Data On-Device</div>
-            </div>
-            <div class="stat">
-              <div class="stat-number">3+</div>
-              <div class="stat-label">Meeting Platforms</div>
-            </div>
-          </div>
-        </div>
-        <div class="hero-visual">
-          <div class="hero-image-placeholder">
-            <div class="placeholder-content">
-              <div class="placeholder-header">
-                <span class="placeholder-dot"></span>
-                <span class="placeholder-dot"></span>
-                <span class="placeholder-dot"></span>
-              </div>
-              <div class="placeholder-body">
-                <div class="placeholder-line"></div>
-                <div class="placeholder-line short"></div>
-                <div class="placeholder-line"></div>
-                <div class="placeholder-line medium"></div>
-                <div class="placeholder-line"></div>
-                <div class="placeholder-line short"></div>
-              </div>
-              <div class="placeholder-label">Live Transcription</div>
-            </div>
-          </div>
+        <span class="hero-badge">AI Meeting Assistant</span>
+        <h1 class="hero-title">Never lose a meeting<br>insight again</h1>
+        <p class="hero-subtitle">Vantage captures every word in real-time, generates intelligent summaries, and keeps everything private on your device. So you can focus on the conversation.</p>
+        <div class="hero-ctas">
+          <a href="#download" class="btn btn-primary">Download for macOS</a>
+          <a href="https://github.com/venkateswarisudalai/MeetBetter" class="btn btn-secondary" target="_blank">View on GitHub</a>
         </div>
       </div>
     </div>
@@ -114,42 +75,122 @@
   <!-- Features Section -->
   <section class="features" id="features">
     <div class="container">
-      <div class="section-header">
-        <h2 class="section-title">Powerful Features for Better Meetings</h2>
-        <p class="section-subtitle">Everything you need to capture, understand, and act on your meeting conversations</p>
+
+      <!-- Feature 1: Real-time Transcription -->
+      <div class="feature-row">
+        <div class="feature-text">
+          <span class="feature-label">Real-time Transcription</span>
+          <h2>Words appear as they're spoken</h2>
+          <p>Powered by Deepgram's nova-2 model, Vantage transcribes your meetings with sub-second latency. Speaker labels distinguish who said what, so you always know the context.</p>
+        </div>
+        <div class="feature-visual">
+          <div class="feature-mockup transcript-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">Live Transcript</span>
+            </div>
+            <div class="mockup-body">
+              <div class="transcript-line you">
+                <span class="label">You</span>
+                <span class="msg">I think we should prioritize the mobile experience</span>
+              </div>
+              <div class="transcript-line participant">
+                <span class="label">Participant</span>
+                <span class="msg">Agreed. The analytics show 60% of users are on mobile</span>
+              </div>
+              <div class="transcript-line you">
+                <span class="label">You</span>
+                <span class="msg">Let's set that as the Q1 goal then</span>
+              </div>
+              <div class="transcript-line interim">
+                <span class="label">Participant</span>
+                <span class="msg">I can draft a proposal by...</span>
+                <span class="typing-indicator"></span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="features-grid">
-        <div class="feature-card">
-          <div class="feature-icon">🎙️</div>
-          <h3 class="feature-title">Real-Time Transcription</h3>
-          <p class="feature-description">Accurate speech-to-text powered by Deepgram. Transcribe as you speak with industry-leading accuracy.</p>
+
+      <!-- Feature 2: AI-Powered Summaries -->
+      <div class="feature-row reverse">
+        <div class="feature-text">
+          <span class="feature-label">AI-Powered Summaries</span>
+          <h2>Key points, action items, decisions</h2>
+          <p>After every meeting, Vantage distills the conversation into structured insights. Key points, action items, and decisions are extracted automatically, so nothing falls through the cracks.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">🤖</div>
-          <h3 class="feature-title">AI-Powered Summaries</h3>
-          <p class="feature-description">Automatically extract key points, action items, and decisions. Save hours of manual note-taking.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🌐</div>
-          <h3 class="feature-title">Multi-Platform Support</h3>
-          <p class="feature-description">Works seamlessly with Google Meet, Zoom, Microsoft Teams, and more. One app for all your meetings.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔒</div>
-          <h3 class="feature-title">Privacy First</h3>
-          <p class="feature-description">All processing happens on your device. No cloud storage, no data collection. Your meetings stay private.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">📚</div>
-          <h3 class="feature-title">Meeting History</h3>
-          <p class="feature-description">Search and review past meetings. Never lose important information or context from previous discussions.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">💾</div>
-          <h3 class="feature-title">Export & Share</h3>
-          <p class="feature-description">Export transcripts and summaries in multiple formats. Share insights with your team effortlessly.</p>
+        <div class="feature-visual">
+          <div class="feature-mockup summary-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">Meeting Summary</span>
+            </div>
+            <div class="mockup-body summary-body">
+              <div class="summary-block">
+                <h4>Key Points</h4>
+                <ul>
+                  <li>Mobile experience prioritized for Q1</li>
+                  <li>60% of current user base on mobile</li>
+                </ul>
+              </div>
+              <div class="summary-block actions">
+                <h4>Action Items</h4>
+                <ul>
+                  <li>Draft mobile-first proposal by Friday</li>
+                  <li>Review analytics dashboard next week</li>
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- Feature 3: Privacy & Calendar -->
+      <div class="feature-row">
+        <div class="feature-text">
+          <span class="feature-label">Private & Integrated</span>
+          <h2>Your meetings, your device</h2>
+          <p>All processing stays on your machine. Connect Google Calendar to auto-start transcription when meetings begin, and hide the app during screen sharing. No cloud, no data collection.</p>
+        </div>
+        <div class="feature-visual">
+          <div class="feature-mockup privacy-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">Vantage</span>
+            </div>
+            <div class="mockup-body privacy-body">
+              <div class="privacy-item">
+                <span class="privacy-icon">&#x1f512;</span>
+                <div>
+                  <strong>On-device processing</strong>
+                  <p>Audio never leaves your machine</p>
+                </div>
+              </div>
+              <div class="privacy-item">
+                <span class="privacy-icon">&#x1f4c5;</span>
+                <div>
+                  <strong>Calendar integration</strong>
+                  <p>Auto-start when meetings begin</p>
+                </div>
+              </div>
+              <div class="privacy-item">
+                <span class="privacy-icon">&#x1f6e1;&#xfe0f;</span>
+                <div>
+                  <strong>Screen share safe</strong>
+                  <p>Hidden during presentations</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </section>
 
@@ -157,26 +198,24 @@
   <section class="how-it-works" id="how-it-works">
     <div class="container">
       <div class="section-header">
-        <h2 class="section-title">How It Works</h2>
-        <p class="section-subtitle">Get started in minutes with three simple steps</p>
+        <h2>Get started in under a minute</h2>
+        <p>Three steps to better meetings</p>
       </div>
       <div class="steps">
         <div class="step">
           <div class="step-number">1</div>
-          <h3 class="step-title">Download & Install</h3>
-          <p class="step-description">Get the desktop app for macOS. Installation takes less than a minute.</p>
+          <h3>Download & install</h3>
+          <p>Grab the macOS app. Add your free API keys for Deepgram and Groq in Settings.</p>
         </div>
-        <div class="step-arrow">→</div>
         <div class="step">
           <div class="step-number">2</div>
-          <h3 class="step-title">Join Your Meeting</h3>
-          <p class="step-description">Works with all major platforms including Google Meet, Zoom, and Microsoft Teams.</p>
+          <h3>Join your meeting</h3>
+          <p>Works with Zoom, Google Meet, Teams, and any audio source. Click "Start Meeting" in Vantage.</p>
         </div>
-        <div class="step-arrow">→</div>
         <div class="step">
           <div class="step-number">3</div>
-          <h3 class="step-title">Get Insights</h3>
-          <p class="step-description">Real-time transcript appears instantly. AI summary generated automatically after the meeting.</p>
+          <h3>Review your insights</h3>
+          <p>Get a structured summary with key points, action items, and decisions. Save and search past meetings.</p>
         </div>
       </div>
     </div>
@@ -185,31 +224,17 @@
   <!-- Download Section -->
   <section class="download" id="download">
     <div class="container">
-      <div class="section-header">
-        <h2 class="section-title">Download Vantage</h2>
-        <p class="section-subtitle">Available now for macOS</p>
-      </div>
-      <div class="download-options download-single">
-        <div class="download-card" id="download-mac">
-          <div class="download-icon">🍎</div>
-          <h3 class="download-title">macOS</h3>
-          <p class="download-description">Universal Binary<br>Intel & Apple Silicon</p>
-          <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.1.0/Vantage_0.1.0_universal.dmg" class="btn btn-download">
-            Download for Mac
+      <div class="download-content">
+        <h2>Ready to transform your meetings?</h2>
+        <p>Available for macOS. Free and open source.</p>
+        <div class="download-actions">
+          <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.1.0/Vantage_0.1.0_universal.dmg" class="btn btn-primary btn-large">
+            Download for macOS
           </a>
-          <p class="download-note">macOS 10.13+ (Intel & M1/M2/M3/M4)</p>
-
-          <!-- macOS Installation Instructions -->
-          <div class="install-instructions-inline">
-            <p class="install-heading">Since Vantage is not yet notarized with Apple, you'll need to allow it manually:</p>
-            <ol>
-              <li>Download and open the DMG file</li>
-              <li>Drag Vantage to your Applications folder</li>
-              <li>Right-click (or Control-click) on Vantage and select <strong>"Open"</strong></li>
-              <li>Click <strong>"Open"</strong> in the dialog that appears</li>
-            </ol>
-            <p class="install-note">You only need to do this once. After that, the app will open normally.</p>
-          </div>
+          <span class="download-note">Universal Binary &middot; Intel & Apple Silicon &middot; macOS 10.13+</span>
+        </div>
+        <div class="install-note-box">
+          <p><strong>First launch:</strong> Right-click the app and select "Open" to bypass Gatekeeper. You only need to do this once.</p>
         </div>
       </div>
     </div>
@@ -220,47 +245,19 @@
     <div class="container">
       <div class="footer-content">
         <div class="footer-brand">
-          <div class="logo">
-            <span class="logo-icon">🎯</span>
-            <span class="logo-text">Vantage</span>
-          </div>
-          <p class="footer-tagline">AI-powered meeting transcription.<br>Free, open-source, privacy-first.</p>
+          <span class="footer-logo">Vantage</span>
+          <p>AI meeting assistant. Free, open-source, privacy-first.</p>
         </div>
         <div class="footer-links">
-          <div class="footer-column">
-            <h4 class="footer-heading">Product</h4>
-            <ul>
-              <li><a href="#features">Features</a></li>
-              <li><a href="#download">Download</a></li>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter#readme" target="_blank">Documentation</a></li>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter/releases" target="_blank">Releases</a></li>
-            </ul>
-          </div>
-          <div class="footer-column">
-            <h4 class="footer-heading">Resources</h4>
-            <ul>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a></li>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter/issues" target="_blank">Support</a></li>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter/blob/main/LICENSE" target="_blank">License</a></li>
-            </ul>
-          </div>
-          <div class="footer-column">
-            <h4 class="footer-heading">Community</h4>
-            <ul>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter/discussions" target="_blank">Discussions</a></li>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter/issues" target="_blank">Report Bug</a></li>
-              <li><a href="https://github.com/venkateswarisudalai/MeetBetter/issues" target="_blank">Request Feature</a></li>
-            </ul>
-          </div>
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How It Works</a>
+          <a href="#download">Download</a>
+          <a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a>
+          <a href="https://github.com/venkateswarisudalai/MeetBetter/issues" target="_blank">Report Issue</a>
         </div>
       </div>
       <div class="footer-bottom">
-        <p class="footer-copyright">&copy; 2025 Vantage. Open source under MIT License.</p>
-        <div class="footer-social">
-          <a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank" aria-label="GitHub">
-            <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          </a>
-        </div>
+        <p>&copy; 2025 Vantage. Open source under MIT License.</p>
       </div>
     </div>
   </footer>

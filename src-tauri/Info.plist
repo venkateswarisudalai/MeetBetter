@@ -4,5 +4,7 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Meeting Assistant needs access to your microphone to record and transcribe meetings.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Vantage captures system audio to separately transcribe meeting participants. Only audio is used — no screen content is recorded or stored.</string>
 </dict>
 </plist>

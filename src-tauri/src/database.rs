@@ -15,6 +15,7 @@ pub struct StoredMeeting {
     pub attendees: Vec<String>,
     pub calendar_event_id: Option<String>,
     pub recording_path: Option<String>,
+    pub user_notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -174,6 +175,7 @@ pub fn create_meeting_from_transcript(
     calendar_event_id: Option<String>,
     recording_path: Option<String>,
     duration_seconds: Option<u64>,
+    user_notes: Option<String>,
 ) -> StoredMeeting {
     let now = Utc::now().to_rfc3339();
 
@@ -206,6 +208,7 @@ pub fn create_meeting_from_transcript(
         attendees,
         calendar_event_id,
         recording_path,
+        user_notes,
         created_at: now.clone(),
         updated_at: now,
     }

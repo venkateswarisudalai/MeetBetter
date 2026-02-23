@@ -1,20 +1,121 @@
-// System audio capture for macOS using ScreenCaptureKit
-// This allows capturing audio from other applications (Zoom, Meet, etc.)
+// System audio capture for macOS
+// Primary: ScreenCaptureKit (macOS 13+, zero config)
+// Fallback: BlackHole / Loopback / Soundflower (any macOS, requires user setup)
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 use anyhow::{anyhow, Result};
+
+/// How system audio is being captured
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemAudioCaptureMethod {
+    /// Apple ScreenCaptureKit (macOS 13+, zero config)
+    ScreenCaptureKit,
+    /// Virtual audio device: BlackHole, Loopback, Soundflower
+    BlackHole,
+    /// No system audio — mono mic only with diarization
+    None,
+}
+
+impl std::fmt::Display for SystemAudioCaptureMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ScreenCaptureKit => write!(f, "ScreenCaptureKit"),
+            Self::BlackHole => write!(f, "BlackHole"),
+            Self::None => write!(f, "None"),
+        }
+    }
+}
+
+/// Audio source identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioSource {
+    Microphone,    // User's voice (stereo mode, channel 0)
+    SystemAudio,   // Remote participants (stereo mode, channel 1)
+    Diarized(u32), // Speaker from diarization (mono mode)
+}
+
+// ─── macOS implementation ───────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
 mod macos {
-    /// Get the system audio loopback device if available
-    pub fn get_system_audio_device() -> Option<cpal::Device> {
+    use super::*;
+
+    /// Check if running macOS 13+ (Ventura) where ScreenCaptureKit audio is available
+    pub fn is_macos_13_or_later() -> bool {
+        use std::process::Command;
+        if let Ok(output) = Command::new("sw_vers").arg("-productVersion").output() {
+            if let Ok(version_str) = String::from_utf8(output.stdout) {
+                let parts: Vec<u32> = version_str
+                    .trim()
+                    .split('.')
+                    .filter_map(|p| p.parse().ok())
+                    .collect();
+                if let Some(&major) = parts.first() {
+                    return major >= 13;
+                }
+            }
+        }
+        false
+    }
+
+    /// Check Screen Recording permission without triggering a prompt.
+    /// Uses CGPreflightScreenCaptureAccess (macOS 10.15+).
+    pub fn check_screencapturekit_permission() -> bool {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+        }
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+
+    /// Request Screen Recording permission (shows the system dialog once).
+    /// Returns true if already authorized, false if prompt was shown.
+    pub fn request_screencapturekit_permission() -> bool {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGRequestScreenCaptureAccess() -> bool;
+        }
+        unsafe { CGRequestScreenCaptureAccess() }
+    }
+
+    /// Determine the best available system audio capture backend.
+    /// Priority: ScreenCaptureKit → BlackHole → None
+    pub fn get_system_audio_backend() -> SystemAudioCaptureMethod {
+        // Try ScreenCaptureKit first (macOS 13+)
+        if is_macos_13_or_later() {
+            if check_screencapturekit_permission() {
+                eprintln!("System audio: ScreenCaptureKit (permission granted)");
+                return SystemAudioCaptureMethod::ScreenCaptureKit;
+            }
+            // Permission not yet granted — request it. If the user hasn't
+            // responded yet, we fall through to BlackHole for this session.
+            eprintln!("System audio: Requesting Screen Recording permission...");
+            request_screencapturekit_permission();
+
+            // Re-check after request (will be true if already authorized)
+            if check_screencapturekit_permission() {
+                eprintln!("System audio: ScreenCaptureKit (permission just granted)");
+                return SystemAudioCaptureMethod::ScreenCaptureKit;
+            }
+            eprintln!("System audio: Screen Recording permission pending/denied");
+        }
+
+        // Fallback: look for virtual audio devices
+        if get_blackhole_device().is_some() {
+            eprintln!("System audio: BlackHole fallback");
+            return SystemAudioCaptureMethod::BlackHole;
+        }
+
+        eprintln!("System audio: None (mono mic only)");
+        SystemAudioCaptureMethod::None
+    }
+
+    /// Get the BlackHole / Loopback / Soundflower device if available
+    pub fn get_blackhole_device() -> Option<cpal::Device> {
         use cpal::traits::{DeviceTrait, HostTrait};
 
         let host = cpal::default_host();
-
-        // Priority order for system audio capture devices
         let device_priority = [
             "BlackHole 2ch",
             "BlackHole",
@@ -23,19 +124,132 @@ mod macos {
             "Soundflower",
         ];
 
-        // First try to find devices by priority
         for priority_name in &device_priority {
-            for device in host.input_devices().ok()? {
-                if let Ok(name) = device.name() {
-                    if name.contains(priority_name) {
-                        eprintln!("Found system audio device: {}", name);
-                        return Some(device);
+            if let Ok(devices) = host.input_devices() {
+                for device in devices {
+                    if let Ok(name) = device.name() {
+                        if name.contains(priority_name) {
+                            eprintln!("Found virtual audio device: {}", name);
+                            return Some(device);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Start system audio capture via ScreenCaptureKit.
+    /// Fills `system_buffer` with i16 PCM samples at `sample_rate` Hz, mono.
+    /// The caller's interleave loop reads from this buffer — same as BlackHole path.
+    pub fn start_screencapturekit_capture(
+        system_buffer: Arc<Mutex<Vec<i16>>>,
+        sample_rate: u32,
+        is_running: Arc<AtomicBool>,
+    ) -> Result<()> {
+        use screencapturekit::prelude::*;
+
+        // Get shareable content (triggers permission prompt if needed)
+        let content = SCShareableContent::get()
+            .map_err(|e| anyhow!("ScreenCaptureKit: failed to get shareable content (Screen Recording permission denied?): {}", e))?;
+
+        let display = content
+            .displays()
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("ScreenCaptureKit: no displays found"))?;
+
+        // Filter: capture all audio from all apps on the primary display
+        let filter = SCContentFilter::create()
+            .with_display(&display)
+            .with_excluding_windows(&[])
+            .build();
+
+        // Minimal 2×2 video (required by API) + audio at matching sample rate, mono
+        let config = SCStreamConfiguration::new()
+            .with_width(2)
+            .with_height(2)
+            .with_captures_audio(true)
+            .with_sample_rate(sample_rate as i32)
+            .with_channel_count(1); // mono — we only need one channel for system audio
+
+        // Handler that pushes audio samples into the shared buffer
+        struct AudioHandler {
+            system_buffer: Arc<Mutex<Vec<i16>>>,
+            is_running: Arc<AtomicBool>,
+        }
+
+        impl SCStreamOutputTrait for AudioHandler {
+            fn did_output_sample_buffer(
+                &self,
+                sample: CMSampleBuffer,
+                output_type: SCStreamOutputType,
+            ) {
+                if !self.is_running.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                if output_type != SCStreamOutputType::Audio {
+                    return; // ignore video frames
+                }
+
+                // Extract audio data from the CMSampleBuffer
+                let audio_buffers = match sample.audio_buffer_list() {
+                    Some(list) => list,
+                    None => return,
+                };
+
+                // Process each audio buffer in the list
+                for buffer in audio_buffers.iter() {
+                    let raw_bytes = buffer.data();
+                    if raw_bytes.is_empty() {
+                        continue;
+                    }
+
+                    // Audio data is f32 PCM — convert to i16
+                    let f32_samples: &[f32] = unsafe {
+                        std::slice::from_raw_parts(
+                            raw_bytes.as_ptr() as *const f32,
+                            raw_bytes.len() / std::mem::size_of::<f32>(),
+                        )
+                    };
+
+                    let i16_samples: Vec<i16> = f32_samples
+                        .iter()
+                        .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+                        .collect();
+
+                    if let Ok(mut buf) = self.system_buffer.lock() {
+                        buf.extend(i16_samples);
                     }
                 }
             }
         }
 
-        None
+        let handler = AudioHandler {
+            system_buffer: system_buffer.clone(),
+            is_running: is_running.clone(),
+        };
+
+        let mut stream = SCStream::new(&filter, &config);
+        // Register for Audio output type to receive audio sample callbacks
+        stream.add_output_handler(handler, SCStreamOutputType::Audio);
+
+        stream.start_capture()
+            .map_err(|e| anyhow!("ScreenCaptureKit: failed to start capture: {}", e))?;
+
+        eprintln!("ScreenCaptureKit system audio capture started");
+
+        // Keep the stream alive on a background thread until is_running becomes false
+        std::thread::spawn(move || {
+            while is_running.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let _ = stream.stop_capture();
+            eprintln!("ScreenCaptureKit system audio capture stopped");
+        });
+
+        Ok(())
     }
 }
 
@@ -43,237 +257,62 @@ mod macos {
 mod macos {
     use super::*;
 
-    pub fn check_virtual_audio_device() -> Option<String> {
+    pub fn get_system_audio_backend() -> SystemAudioCaptureMethod {
+        SystemAudioCaptureMethod::None
+    }
+
+    pub fn get_blackhole_device() -> Option<cpal::Device> {
         None
     }
 
-    pub fn get_system_audio_device() -> Option<cpal::Device> {
-        None
+    pub fn check_screencapturekit_permission() -> bool {
+        false
+    }
+
+    pub fn start_screencapturekit_capture(
+        _system_buffer: Arc<Mutex<Vec<i16>>>,
+        _sample_rate: u32,
+        _is_running: Arc<AtomicBool>,
+    ) -> Result<()> {
+        Err(anyhow!("ScreenCaptureKit is only available on macOS"))
     }
 }
 
 pub use macos::*;
 
-/// Audio source identifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AudioSource {
-    Microphone,    // User's voice
-    SystemAudio,   // Remote participants (from Zoom/Meet/etc)
+// ─── Compat: keep get_system_audio_device() working for any code that still uses it ───
+
+/// Legacy function: returns a cpal device for BlackHole/Loopback/Soundflower.
+/// Prefer get_system_audio_backend() for new code.
+pub fn get_system_audio_device() -> Option<cpal::Device> {
+    get_blackhole_device()
 }
 
-/// Combined audio message with source information
-#[derive(Debug, Clone)]
-pub struct SourcedAudioChunk {
-    pub data: Vec<u8>,
-    pub source: AudioSource,
-}
+/// Returns the name of the detected virtual audio device, or None
+pub fn get_system_audio_device_name() -> Option<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
 
-/// Dual audio capturer that captures both microphone and system audio
-pub struct DualAudioCapturer {
-    is_running: Arc<AtomicBool>,
-    has_system_audio: bool,
-}
+    let host = cpal::default_host();
+    let device_priority = [
+        "BlackHole 2ch",
+        "BlackHole",
+        "Loopback Audio",
+        "Soundflower (2ch)",
+        "Soundflower",
+    ];
 
-impl DualAudioCapturer {
-    pub fn new() -> Self {
-        let has_system_audio = get_system_audio_device().is_some();
-        if has_system_audio {
-            eprintln!("System audio capture available");
-        } else {
-            eprintln!("No system audio device found. Install BlackHole for full speaker separation.");
-            eprintln!("  Download: https://github.com/ExistentialAudio/BlackHole");
-        }
-
-        Self {
-            is_running: Arc::new(AtomicBool::new(false)),
-            has_system_audio,
-        }
-    }
-
-    pub fn has_system_audio(&self) -> bool {
-        self.has_system_audio
-    }
-
-    /// Start capturing audio from both microphone and system audio (if available)
-    /// Audio is sent as interleaved stereo: left channel = mic, right channel = system
-    pub fn start(
-        &self,
-        audio_tx: mpsc::Sender<Vec<u8>>,
-        sample_rate: u32,
-    ) -> Result<()> {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
-        if self.is_running.load(Ordering::SeqCst) {
-            return Err(anyhow!("Already running"));
-        }
-
-        self.is_running.store(true, Ordering::SeqCst);
-
-        let host = cpal::default_host();
-
-        // Get microphone device
-        let mic_device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow!("No microphone found"))?;
-
-        eprintln!("Microphone: {:?}", mic_device.name());
-
-        // Get system audio device (if available)
-        let system_device = get_system_audio_device();
-
-        if let Some(ref dev) = system_device {
-            eprintln!("System audio: {:?}", dev.name());
-        }
-
-        let is_running = self.is_running.clone();
-        let has_system = system_device.is_some();
-
-        std::thread::spawn(move || {
-            // Shared buffers for mic and system audio
-            let mic_buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
-            let system_buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
-
-            // Buffer size for ~100ms of audio
-            let buffer_samples = (sample_rate as usize / 10) as usize;
-
-            // Build microphone stream
-            let mic_buffer_clone = mic_buffer.clone();
-            let mic_config = cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(sample_rate),
-                buffer_size: cpal::BufferSize::Default,
-            };
-
-            let mic_stream = mic_device.build_input_stream(
-                &mic_config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let samples: Vec<i16> = data
-                        .iter()
-                        .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
-                        .collect();
-
-                    if let Ok(mut buf) = mic_buffer_clone.lock() {
-                        buf.extend(samples);
+    for priority_name in &device_priority {
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                if let Ok(name) = device.name() {
+                    if name.contains(priority_name) {
+                        return Some(name);
                     }
-                },
-                |err| eprintln!("Mic stream error: {}", err),
-                None,
-            );
-
-            // Build system audio stream (if available)
-            let system_stream = if let Some(sys_dev) = system_device {
-                let system_buffer_clone = system_buffer.clone();
-                let sys_config = cpal::StreamConfig {
-                    channels: 1, // We'll take just one channel
-                    sample_rate: cpal::SampleRate(sample_rate),
-                    buffer_size: cpal::BufferSize::Default,
-                };
-
-                match sys_dev.build_input_stream(
-                    &sys_config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        let samples: Vec<i16> = data
-                            .iter()
-                            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
-                            .collect();
-
-                        if let Ok(mut buf) = system_buffer_clone.lock() {
-                            buf.extend(samples);
-                        }
-                    },
-                    |err| eprintln!("System audio stream error: {}", err),
-                    None,
-                ) {
-                    Ok(stream) => Some(stream),
-                    Err(e) => {
-                        eprintln!("Failed to build system audio stream: {}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            // Start streams
-            if let Ok(ref stream) = mic_stream {
-                if let Err(e) = stream.play() {
-                    eprintln!("Failed to start mic stream: {}", e);
-                    return;
-                }
-                eprintln!("Microphone capture started");
-            }
-
-            if let Some(ref stream) = system_stream {
-                if let Err(e) = stream.play() {
-                    eprintln!("Failed to start system audio stream: {}", e);
-                }
-                eprintln!("System audio capture started");
-            }
-
-            // Main loop: mix audio into stereo and send
-            while is_running.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-
-                let mic_samples: Vec<i16>;
-                let system_samples: Vec<i16>;
-
-                // Get mic samples
-                {
-                    let mut buf = mic_buffer.lock().unwrap();
-                    if buf.len() >= buffer_samples {
-                        mic_samples = buf.drain(..buffer_samples).collect();
-                    } else {
-                        continue;
-                    }
-                }
-
-                // Get system samples (or silence if not available)
-                if has_system {
-                    let mut buf = system_buffer.lock().unwrap();
-                    if buf.len() >= buffer_samples {
-                        system_samples = buf.drain(..buffer_samples).collect();
-                    } else {
-                        // Pad with silence if system audio is behind
-                        system_samples = vec![0i16; buffer_samples];
-                    }
-                } else {
-                    // No system audio device - just silence
-                    system_samples = vec![0i16; buffer_samples];
-                }
-
-                // Interleave as stereo: [mic_0, sys_0, mic_1, sys_1, ...]
-                // Left channel (0) = Microphone = You
-                // Right channel (1) = System Audio = Participants
-                let mut stereo_bytes: Vec<u8> = Vec::with_capacity(buffer_samples * 4);
-                for i in 0..buffer_samples {
-                    let mic_sample = mic_samples.get(i).copied().unwrap_or(0);
-                    let sys_sample = system_samples.get(i).copied().unwrap_or(0);
-
-                    // Left channel (mic)
-                    stereo_bytes.extend_from_slice(&mic_sample.to_le_bytes());
-                    // Right channel (system)
-                    stereo_bytes.extend_from_slice(&sys_sample.to_le_bytes());
-                }
-
-                // Send the stereo audio
-                if audio_tx.blocking_send(stereo_bytes).is_err() {
-                    break;
                 }
             }
-
-            eprintln!("Dual audio capture stopped");
-        });
-
-        Ok(())
+        }
     }
-
-    pub fn stop(&self) {
-        self.is_running.store(false, Ordering::SeqCst);
-    }
-
-    pub fn is_running(&self) -> bool {
-        self.is_running.load(Ordering::SeqCst)
-    }
+    None
 }
 
 /// List available audio devices for debugging

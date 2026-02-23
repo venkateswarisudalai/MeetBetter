@@ -137,17 +137,14 @@ The app should launch automatically! 🚀
 
 ### Step 3: Configure API Keys
 
+You only need **2 free API keys** to get started. Calendar integration and cloud sync are built in — no extra configuration needed.
+
 1. **Get API Keys** (both have free tiers):
-   - **Deepgram**: Sign up at https://console.deepgram.com
-     - Navigate to API Keys → Create New Key
-     - Copy the key
-   - **Groq**: Sign up at https://console.groq.com
-     - Go to API Keys → Create API Key
-     - Copy the key
+   - **Deepgram**: Sign up at https://console.deepgram.com — includes $200 free credit
+   - **Groq**: Sign up at https://console.groq.com — free tier
 
 2. **Add Keys to App**:
-   - Open MeetBetter app
-   - Click **Settings** icon (gear icon in top right)
+   - Open MeetBetter app — the welcome screen guides you through both steps
    - Paste your Deepgram API key
    - Paste your Groq API key
    - Click **Save**
@@ -209,25 +206,19 @@ brew install blackhole-2ch
 
 ### Step 5: Set Up Calendar Auto-Start (Optional)
 
-**Why do this?** Automatically start transcription when your meetings begin.
+**Why do this?** Automatically start transcription when your meetings begin. Calendar integration is built in — just click connect.
 
-1. **Enable Feature**:
+1. **Connect Google Calendar**:
    - Open MeetBetter → **Settings**
-   - Scroll to **"Meeting Auto-Start"** section
+   - Click **"Connect Calendar"** — your browser opens for Google sign-in
+   - Grant calendar permissions and you'll be redirected back
+
+2. **Enable Auto-Start**:
    - Toggle **"Auto-start on meeting time"** to ON
-
-2. **Connect Google Calendar**:
-   - Click **"Connect Calendar"** button
-   - Sign in with your Google account
-   - Grant calendar read permissions
-   - You'll be redirected back to the app
-
-3. **Configure Settings**:
    - **Start buffer time**: How many minutes before meeting to start (default: 2 minutes)
    - **Detect meeting apps**: Auto-detect Zoom, Teams, Google Meet, etc. (recommended: ON)
-   - **Auto-start on time**: Start transcription automatically (recommended: ON)
 
-4. **Test It**:
+3. **Test It**:
    - Create a test meeting in Google Calendar (5 minutes from now)
    - Open Zoom/Teams/Meet app
    - MeetBetter should show "Meeting starting in X minutes"
@@ -287,22 +278,18 @@ sudo reboot
 
 ## API Setup
 
-You'll need API keys from the following services:
+You only need **2 free API keys** to get started. Calendar and cloud sync are built in.
 
 | Service | Purpose | Get Key | Free Tier |
 |---------|---------|---------|-----------|
 | **Deepgram** | Real-time transcription | [console.deepgram.com](https://console.deepgram.com) | $200 credit |
 | **Groq** | AI summaries & replies | [console.groq.com/keys](https://console.groq.com/keys) | Free tier |
-| **AssemblyAI** (optional) | Batch transcription | [assemblyai.com/app](https://www.assemblyai.com/app) | 100 hrs/month |
-
-### Minimum Setup
-- **Deepgram + Groq** = Full real-time experience with AI features
 
 ### Setting Up Keys
-1. Open the app
-2. Click **Settings** in the header
-3. Enter your API keys
-4. Start transcribing!
+1. Open the app — the welcome screen guides you
+2. Get your Deepgram key (includes $200 free credit)
+3. Get your Groq key (free tier)
+4. Paste both in Settings → Start transcribing!
 
 ## Usage
 

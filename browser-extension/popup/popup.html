@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeetBetter</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <span class="icon">🎯</span>
+        <h1>MeetBetter</h1>
+      </div>
+      <div class="status-indicator" id="desktopStatus">
+        <span class="dot"></span>
+        <span class="text">Desktop App</span>
+      </div>
+    </div>
+
+    <!-- Current Meeting Section -->
+    <div class="section" id="currentMeetingSection" style="display: none;">
+      <h2>Current Meeting</h2>
+      <div class="meeting-card active">
+        <div class="meeting-info">
+          <div class="meeting-platform" id="meetingPlatform">Google Meet</div>
+          <div class="meeting-title" id="meetingTitle">Loading...</div>
+          <div class="meeting-meta">
+            <span id="meetingDuration">00:00</span>
+            <span class="separator">•</span>
+            <span id="participantCount">0 participants</span>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="startTranscriptionBtn">
+          <span class="btn-icon">🎙️</span>
+          Start Transcription
+        </button>
+      </div>
+    </div>
+
+    <!-- No Meeting Section -->
+    <div class="section" id="noMeetingSection">
+      <div class="empty-state">
+        <div class="empty-icon">📅</div>
+        <h3>No active meeting</h3>
+        <p>Join a meeting on Google Meet, Zoom, or Teams to get started.</p>
+      </div>
+    </div>
+
+    <!-- Recent Meetings -->
+    <div class="section">
+      <div class="section-header">
+        <h2>Recent Meetings</h2>
+        <button class="btn-text" id="viewAllBtn">View All</button>
+      </div>
+      <div id="recentMeetings" class="meetings-list">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="section">
+      <h2>Quick Actions</h2>
+      <div class="actions-grid">
+        <button class="action-btn" id="openDesktopBtn">
+          <span class="action-icon">🖥️</span>
+          <span class="action-label">Open Desktop App</span>
+        </button>
+        <button class="action-btn" id="settingsBtn">
+          <span class="action-icon">⚙️</span>
+          <span class="action-label">Settings</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <a href="#" id="helpLink">Help</a>
+      <span class="separator">•</span>
+      <a href="#" id="feedbackLink">Feedback</a>
+      <span class="separator">•</span>
+      <span class="version">v1.0.0</span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

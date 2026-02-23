@@ -23,9 +23,7 @@ pub struct AppSettings {
     #[serde(default)]
     pub meeting_context: String,
     #[serde(default)]
-    pub google_client_id: String,
-    #[serde(default)]
-    pub google_client_secret: String,
+    pub cloud_sync_enabled: bool,
 }
 
 impl AppSettings {

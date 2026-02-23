@@ -8,7 +8,11 @@ use chrono::{DateTime, Utc, Duration};
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3";
-const SCOPES: &str = "https://www.googleapis.com/auth/calendar.readonly";
+const SCOPES: &str = "https://www.googleapis.com/auth/calendar.events";
+
+/// Embedded app-level OAuth credentials (baked in at compile time)
+pub const GOOGLE_CLIENT_ID: &str = env!("GOOGLE_CLIENT_ID");
+pub const GOOGLE_CLIENT_SECRET: &str = env!("GOOGLE_CLIENT_SECRET");
 
 /// Calendar event from Google Calendar API
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +163,10 @@ impl GoogleCalendar {
             client_secret,
             redirect_uri: "http://localhost:8765/callback".to_string(),
         }
+    }
+
+    pub fn with_embedded_credentials() -> Self {
+        Self::new(GOOGLE_CLIENT_ID.to_string(), GOOGLE_CLIENT_SECRET.to_string())
     }
 
     /// Generate the OAuth2 authorization URL
@@ -376,6 +384,34 @@ impl GoogleCalendar {
             limit,
         ).await?;
         Ok(events)
+    }
+
+    /// Update an event's description (used to share meeting summary to calendar)
+    pub async fn update_event_description(&self, event_id: &str, description: &str) -> Result<(), String> {
+        let access_token = self.get_valid_token().await?;
+        let url = format!("{}/calendars/primary/events/{}", GOOGLE_CALENDAR_API, event_id);
+
+        let body = serde_json::json!({ "description": description });
+
+        let response = self.client
+            .patch(&url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to update event: {}", e))?;
+
+        if response.status().as_u16() == 403 {
+            return Err("Insufficient permissions. Please disconnect and reconnect your Google Calendar to grant write access.".to_string());
+        }
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("Failed to update event description: {}", error_text));
+        }
+
+        Ok(())
     }
 
     /// Get past events

@@ -664,9 +664,19 @@ body {
   margin: 0;
 }
 
-/* Hide speaker labels in chat mode - position already indicates speaker */
+/* Show speaker labels in chat mode for diarized speakers */
 .transcript-list.chat-style .speaker-label {
   display: none;
+}
+
+.transcript-list.chat-style .speaker-label.diarized {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  opacity: 0.8;
 }
 
 .transcript-list.chat-style .interim-badge {
@@ -1363,6 +1373,9 @@ body {
   border-radius: var(--radius-lg);
   width: 90%;
   max-width: 400px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
 }
 
@@ -1382,6 +1395,8 @@ body {
 
 .settings-modal .modal-content {
   padding: 24px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .setting-item {
@@ -1726,6 +1741,64 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Audio Mode Badge */
+.audio-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-left: 8px;
+}
+
+.audio-mode-badge.multichannel {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.audio-mode-badge.diarize {
+  background: rgba(255, 183, 77, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(255, 183, 77, 0.3);
+}
+
+/* System Audio Silence Warning Banner */
+.silence-warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: rgba(255, 183, 77, 0.12);
+  border-bottom: 1px solid rgba(255, 183, 77, 0.3);
+  color: #E65100;
+  font-size: 13px;
+}
+
+.silence-warning-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.silence-warning-dismiss {
+  background: none;
+  border: 1px solid rgba(230, 81, 0, 0.3);
+  color: #E65100;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-left: 16px;
+  white-space: nowrap;
+}
+
+.silence-warning-dismiss:hover {
+  background: rgba(230, 81, 0, 0.1);
+}
+
 .stop-btn {
   padding: 10px 24px;
   background: var(--danger);
@@ -1851,26 +1924,17 @@ body {
   z-index: 101;
 }
 
-/* --- COLLAPSIBLE SUGGESTIONS PANEL --- */
-.suggestions-panel {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 340px;
-  max-height: 400px;
-  background: rgba(30, 30, 30, 0.95);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  z-index: 100;
+/* --- INLINE SUGGESTIONS PANEL (below notepad) --- */
+.suggestions-inline {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(30, 30, 30, 0.6);
+  flex-shrink: 0;
   transition: all 0.3s ease;
   overflow: hidden;
 }
 
-.suggestions-panel.minimized {
+.suggestions-inline.minimized {
   max-height: 48px;
-  width: 200px;
 }
 
 .suggestions-header {
@@ -2752,4 +2816,319 @@ body {
   border-radius: 4px;
   background: var(--bg-secondary);
   color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .silence-warning-banner {
+    background: rgba(255, 183, 77, 0.08);
+    color: #FFCC80;
+    border-bottom-color: rgba(255, 183, 77, 0.2);
+  }
+
+  .silence-warning-dismiss {
+    color: #FFCC80;
+    border-color: rgba(255, 204, 128, 0.3);
+  }
+
+  .silence-warning-dismiss:hover {
+    background: rgba(255, 204, 128, 0.1);
+  }
+}
+
+/* ============================================
+   GRANOLA-STYLE RECORDING LAYOUT
+   ============================================ */
+
+/* Green Dancing Bars (replaces red rec-dot) */
+.green-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+
+.green-bars .gbar {
+  width: 3px;
+  background: #4CAF50;
+  border-radius: 2px;
+  animation: green-dance 0.6s ease-in-out infinite;
+}
+
+.green-bars .gbar:nth-child(1) { animation-delay: 0s; height: 10px; }
+.green-bars .gbar:nth-child(2) { animation-delay: 0.1s; height: 16px; }
+.green-bars .gbar:nth-child(3) { animation-delay: 0.2s; height: 8px; }
+.green-bars .gbar:nth-child(4) { animation-delay: 0.3s; height: 14px; }
+
+@keyframes green-dance {
+  0%, 100% { transform: scaleY(1); opacity: 1; }
+  50% { transform: scaleY(0.3); opacity: 0.7; }
+}
+
+.recording-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Transcript Toggle Button */
+.transcript-toggle {
+  padding: 6px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.transcript-toggle:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Recording Body: Notepad + Transcript side by side */
+.recording-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Notepad Panel (left, 60%) */
+.notepad-panel {
+  width: 60%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.notepad-panel.full-width {
+  width: 100%;
+  border-right: none;
+}
+
+/* Notepad Editor (contentEditable) */
+.notepad-editor {
+  flex: 1;
+  min-height: 200px;
+  padding: 24px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text);
+  outline: none;
+  overflow-y: auto;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.notepad-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+/* Transcript Panel (right, 40%) */
+.transcript-panel-right {
+  width: 40%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.transcript-panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.transcript-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  padding-bottom: 100px;
+}
+
+/* ============================================
+   DONE STATE: USER NOTES & ENHANCED NOTES
+   ============================================ */
+
+.user-notes-section {
+  margin-bottom: 32px;
+}
+
+.user-note-text {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  font-weight: 500;
+  white-space: pre-wrap;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+/* Enhance Button */
+.enhance-btn {
+  padding: 7px 16px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.enhance-btn:hover:not(:disabled) {
+  background: #43A047;
+}
+
+.enhance-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Enhanced Notes */
+.enhanced-notes {
+  margin-bottom: 32px;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.enhanced-notes h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.enhanced-notes-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.enhanced-section-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 16px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.user-note-line {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.ai-note-line {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  padding: 4px 0 4px 12px;
+  border-left: 3px solid #4CAF50;
+}
+
+/* ============================================
+   DARK MODE: GRANOLA ADDITIONS
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+  .notepad-editor {
+    background: var(--bg);
+  }
+
+  .transcript-panel-right {
+    background: #1E1D1C;
+  }
+
+  .user-note-text {
+    background: #2A2928;
+  }
+
+  .enhanced-notes {
+    background: #2A2928;
+  }
+
+  .transcript-toggle {
+    background: #2A2928;
+  }
+}
+
+/* ============== Onboarding Steps ============== */
+
+.setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 24px 0;
+  max-width: 380px;
+}
+
+.setup-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+
+.setup-step.done {
+  border-color: var(--success);
+  opacity: 0.6;
+}
+
+.step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.setup-step.done .step-number {
+  background: var(--success);
+}
+
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.step-content strong {
+  font-size: 15px;
+}
+
+.step-content .help-link {
+  font-size: 12px;
+  margin-top: 2px;
 }

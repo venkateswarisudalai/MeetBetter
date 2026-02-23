@@ -21,9 +21,10 @@ src-tauri/target/
 # Recordings (user data)
 recordings/
 
-# API Keys - NEVER commit these!
+# API Keys and build secrets - NEVER commit these!
 .env
 .env.local
+.env.build
 .env.*.local
 *.key
 *secrets*
@@ -42,3 +43,6 @@ recordings/
 # OS files
 Thumbs.db
 *.DS_Store
+
+# Local Netlify folder
+.netlify

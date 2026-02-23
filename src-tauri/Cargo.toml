@@ -1,6 +1,6 @@
 [package]
 name = "vantage"
-version = "0.1.0"
+version = "0.2.0"
 description = "Vantage - Privacy-focused real-time meeting transcription with AI-powered suggestions"
 authors = ["Venkateswari"]
 license = "MIT"
@@ -52,6 +52,7 @@ dotenvy = "0.15"  # Load .env files
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc = "0.2"
+screencapturekit = "1.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
