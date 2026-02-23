@@ -30,7 +30,7 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Stylesheets -->
   <link rel="stylesheet" href="css/styles.css">
@@ -41,22 +41,12 @@
   <nav class="navbar">
     <div class="container">
       <div class="nav-content">
-        <a href="#" class="logo">
-          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" width="22" height="22">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          Vantage
-        </a>
+        <a href="#" class="logo">Vantage</a>
         <ul class="nav-links">
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How It Works</a></li>
           <li><a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a></li>
-          <li>
-            <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.2.0/Vantage_0.2.0_aarch64.dmg" class="nav-cta">
-              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-              Download
-            </a>
-          </li>
+          <li><a href="#download" class="nav-cta">Download</a></li>
         </ul>
         <button class="mobile-menu-toggle" aria-label="Toggle menu">
           <span></span>
@@ -71,81 +61,12 @@
   <section class="hero" id="hero">
     <div class="container">
       <div class="hero-content">
-        <span class="hero-badge">Free &amp; Open Source</span>
-        <h1 class="hero-title">Your AI notepad<br>for meetings</h1>
-        <p class="hero-subtitle">Real-time transcription, AI summaries, and smart reply suggestions. All running on your Mac. Just two free API keys to start.</p>
+        <span class="hero-badge">AI Meeting Assistant</span>
+        <h1 class="hero-title">Never lose a meeting<br>insight again</h1>
+        <p class="hero-subtitle">Vantage captures every word in real-time, generates intelligent summaries, and keeps everything private on your device. So you can focus on the conversation.</p>
         <div class="hero-ctas">
-          <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.2.0/Vantage_0.2.0_aarch64.dmg" class="btn btn-primary btn-large">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-            Download for Mac
-          </a>
-          <a href="#how-it-works" class="btn btn-secondary">See how it works</a>
-        </div>
-        <p class="hero-meta">v0.2.0 &middot; Apple Silicon &middot; macOS 10.13+</p>
-      </div>
-
-      <!-- Hero App Mockup -->
-      <div class="hero-mockup">
-        <div class="app-window">
-          <div class="app-titlebar">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
-            <span class="app-title">Vantage</span>
-          </div>
-          <div class="app-body">
-            <div class="app-sidebar">
-              <div class="sidebar-item active">
-                <span class="sidebar-icon">&#9679;</span>
-                Weekly Standup
-              </div>
-              <div class="sidebar-item">Product Review</div>
-              <div class="sidebar-item">1:1 with Sarah</div>
-            </div>
-            <div class="app-main">
-              <div class="transcript-line you">
-                <span class="speaker">You</span>
-                <span class="text">I think we should prioritize the mobile experience for Q1</span>
-              </div>
-              <div class="transcript-line other">
-                <span class="speaker">Sarah</span>
-                <span class="text">Agreed. The analytics show 60% of users are on mobile now</span>
-              </div>
-              <div class="transcript-line you">
-                <span class="speaker">You</span>
-                <span class="text">Let's set that as the goal then. Can you draft a proposal?</span>
-              </div>
-              <div class="transcript-line other typing">
-                <span class="speaker">Sarah</span>
-                <span class="text">I'll have something ready by<span class="cursor"></span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Works With -->
-  <section class="works-with">
-    <div class="container">
-      <p class="works-with-label">Works with any meeting platform</p>
-      <div class="platform-logos">
-        <div class="platform">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-          <span>Zoom</span>
-        </div>
-        <div class="platform">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-          <span>Google Meet</span>
-        </div>
-        <div class="platform">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-          <span>Teams</span>
-        </div>
-        <div class="platform">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-          <span>Any Audio</span>
+          <a href="#download" class="btn btn-primary">Download for macOS</a>
+          <a href="https://github.com/venkateswarisudalai/MeetBetter" class="btn btn-secondary" target="_blank">View on GitHub</a>
         </div>
       </div>
     </div>
@@ -154,190 +75,147 @@
   <!-- Features Section -->
   <section class="features" id="features">
     <div class="container">
-      <div class="section-header">
-        <span class="section-label">Features</span>
-        <h2>Everything you need from a meeting assistant</h2>
-      </div>
 
-      <div class="feature-grid">
-        <!-- Feature 1 -->
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-          </div>
-          <h3>Real-time transcription</h3>
-          <p>Words appear as they're spoken. Powered by Deepgram's nova-2 with sub-second latency. Speaker labels distinguish who said what.</p>
+      <!-- Feature 1: Real-time Transcription -->
+      <div class="feature-row">
+        <div class="feature-text">
+          <span class="feature-label">Real-time Transcription</span>
+          <h2>Words appear as they're spoken</h2>
+          <p>Powered by Deepgram's nova-2 model, Vantage transcribes your meetings with sub-second latency. Speaker labels distinguish who said what, so you always know the context.</p>
         </div>
-
-        <!-- Feature 2 -->
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+        <div class="feature-visual">
+          <div class="feature-mockup transcript-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">Live Transcript</span>
+            </div>
+            <div class="mockup-body">
+              <div class="transcript-line you">
+                <span class="label">You</span>
+                <span class="msg">I think we should prioritize the mobile experience</span>
+              </div>
+              <div class="transcript-line participant">
+                <span class="label">Participant</span>
+                <span class="msg">Agreed. The analytics show 60% of users are on mobile</span>
+              </div>
+              <div class="transcript-line you">
+                <span class="label">You</span>
+                <span class="msg">Let's set that as the Q1 goal then</span>
+              </div>
+              <div class="transcript-line interim">
+                <span class="label">Participant</span>
+                <span class="msg">I can draft a proposal by...</span>
+                <span class="typing-indicator"></span>
+              </div>
+            </div>
           </div>
-          <h3>AI-powered summaries</h3>
-          <p>Key points, action items, and decisions extracted automatically after every meeting. Nothing falls through the cracks.</p>
-        </div>
-
-        <!-- Feature 3 -->
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-          </div>
-          <h3>Smart reply suggestions</h3>
-          <p>Get contextual reply suggestions during live meetings. AI understands the conversation and helps you respond thoughtfully.</p>
-        </div>
-
-        <!-- Feature 4 -->
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-          </div>
-          <h3>Calendar integration</h3>
-          <p>Connect Google Calendar with one click. Auto-start transcription when meetings begin. No complex setup needed.</p>
-        </div>
-
-        <!-- Feature 5 -->
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-          </div>
-          <h3>Privacy first</h3>
-          <p>All processing stays on your device. Audio never leaves your machine. Hidden during screen sharing. No cloud, no data collection.</p>
-        </div>
-
-        <!-- Feature 6 -->
-        <div class="feature-card">
-          <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path><polyline points="16 16 12 12 8 16"></polyline></svg>
-          </div>
-          <h3>Cloud sync</h3>
-          <p>Optionally back up meetings to the cloud. Toggle on in settings and your meetings auto-sync across sessions.</p>
         </div>
       </div>
+
+      <!-- Feature 2: AI-Powered Summaries -->
+      <div class="feature-row reverse">
+        <div class="feature-text">
+          <span class="feature-label">AI-Powered Summaries</span>
+          <h2>Key points, action items, decisions</h2>
+          <p>After every meeting, Vantage distills the conversation into structured insights. Key points, action items, and decisions are extracted automatically, so nothing falls through the cracks.</p>
+        </div>
+        <div class="feature-visual">
+          <div class="feature-mockup summary-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">Meeting Summary</span>
+            </div>
+            <div class="mockup-body summary-body">
+              <div class="summary-block">
+                <h4>Key Points</h4>
+                <ul>
+                  <li>Mobile experience prioritized for Q1</li>
+                  <li>60% of current user base on mobile</li>
+                </ul>
+              </div>
+              <div class="summary-block actions">
+                <h4>Action Items</h4>
+                <ul>
+                  <li>Draft mobile-first proposal by Friday</li>
+                  <li>Review analytics dashboard next week</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature 3: Privacy & Calendar -->
+      <div class="feature-row">
+        <div class="feature-text">
+          <span class="feature-label">Private & Integrated</span>
+          <h2>Your meetings, your device</h2>
+          <p>All processing stays on your machine. Connect Google Calendar to auto-start transcription when meetings begin, and hide the app during screen sharing. No cloud, no data collection.</p>
+        </div>
+        <div class="feature-visual">
+          <div class="feature-mockup privacy-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">Vantage</span>
+            </div>
+            <div class="mockup-body privacy-body">
+              <div class="privacy-item">
+                <span class="privacy-icon">&#x1f512;</span>
+                <div>
+                  <strong>On-device processing</strong>
+                  <p>Audio never leaves your machine</p>
+                </div>
+              </div>
+              <div class="privacy-item">
+                <span class="privacy-icon">&#x1f4c5;</span>
+                <div>
+                  <strong>Calendar integration</strong>
+                  <p>Auto-start when meetings begin</p>
+                </div>
+              </div>
+              <div class="privacy-item">
+                <span class="privacy-icon">&#x1f6e1;&#xfe0f;</span>
+                <div>
+                  <strong>Screen share safe</strong>
+                  <p>Hidden during presentations</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </section>
 
-  <!-- How It Works -->
+  <!-- How It Works Section -->
   <section class="how-it-works" id="how-it-works">
     <div class="container">
       <div class="section-header">
-        <span class="section-label">Setup</span>
         <h2>Get started in under a minute</h2>
-        <p>Two free API keys. That's it.</p>
+        <p>Three steps to better meetings</p>
       </div>
-
-      <div class="setup-flow">
-        <div class="setup-step">
-          <div class="setup-number">1</div>
-          <div class="setup-content">
-            <h3>Download &amp; install</h3>
-            <p>Download the .dmg, drag to Applications. On first launch, right-click and select "Open".</p>
-          </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <h3>Download & install</h3>
+          <p>Grab the macOS app. Add your free API keys for Deepgram and Groq in Settings.</p>
         </div>
-
-        <div class="setup-connector"></div>
-
-        <div class="setup-step">
-          <div class="setup-number">2</div>
-          <div class="setup-content">
-            <h3>Get two free API keys</h3>
-            <div class="key-cards">
-              <a href="https://console.deepgram.com" target="_blank" class="key-card">
-                <strong>Deepgram</strong>
-                <span>Real-time transcription</span>
-                <span class="key-tag">Includes $200 free credit</span>
-              </a>
-              <a href="https://console.groq.com/keys" target="_blank" class="key-card">
-                <strong>Groq</strong>
-                <span>AI summaries &amp; suggestions</span>
-                <span class="key-tag">Free tier</span>
-              </a>
-            </div>
-          </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <h3>Join your meeting</h3>
+          <p>Works with Zoom, Google Meet, Teams, and any audio source. Click "Start Meeting" in Vantage.</p>
         </div>
-
-        <div class="setup-connector"></div>
-
-        <div class="setup-step">
-          <div class="setup-number">3</div>
-          <div class="setup-content">
-            <h3>Paste keys &amp; go</h3>
-            <p>Open Settings in Vantage, paste both keys, and you're ready. Join any meeting and hit "Start Meeting".</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- App Preview (detailed mockups) -->
-  <section class="preview" id="preview">
-    <div class="container">
-      <div class="section-header">
-        <span class="section-label">In Action</span>
-        <h2>See what Vantage captures</h2>
-      </div>
-
-      <div class="preview-grid">
-        <!-- Transcript Preview -->
-        <div class="preview-card">
-          <div class="preview-header">
-            <span class="preview-dot red"></span>
-            <span class="preview-dot yellow"></span>
-            <span class="preview-dot green"></span>
-            <span class="preview-title">Live Transcript</span>
-            <span class="preview-badge live">LIVE</span>
-          </div>
-          <div class="preview-body">
-            <div class="t-line you">
-              <span class="t-label">You</span>
-              <span class="t-msg">I think we should prioritize the mobile experience</span>
-            </div>
-            <div class="t-line other">
-              <span class="t-label">Sarah</span>
-              <span class="t-msg">Agreed. The analytics show 60% of users are on mobile</span>
-            </div>
-            <div class="t-line you">
-              <span class="t-label">You</span>
-              <span class="t-msg">Let's set that as the Q1 goal then</span>
-            </div>
-            <div class="t-line other dim">
-              <span class="t-label">Sarah</span>
-              <span class="t-msg">I can draft a proposal by...<span class="typing-dot"></span></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Summary Preview -->
-        <div class="preview-card">
-          <div class="preview-header">
-            <span class="preview-dot red"></span>
-            <span class="preview-dot yellow"></span>
-            <span class="preview-dot green"></span>
-            <span class="preview-title">Meeting Summary</span>
-          </div>
-          <div class="preview-body">
-            <div class="s-section">
-              <h4>Key Points</h4>
-              <ul>
-                <li>Mobile experience prioritized for Q1</li>
-                <li>60% of current user base on mobile</li>
-                <li>Team aligned on mobile-first approach</li>
-              </ul>
-            </div>
-            <div class="s-section actions">
-              <h4>Action Items</h4>
-              <ul>
-                <li>Draft mobile-first proposal by Friday</li>
-                <li>Review analytics dashboard next week</li>
-              </ul>
-            </div>
-            <div class="s-section">
-              <h4>Decisions</h4>
-              <ul>
-                <li>Q1 goal: Mobile experience overhaul</li>
-              </ul>
-            </div>
-          </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <h3>Review your insights</h3>
+          <p>Get a structured summary with key points, action items, and decisions. Save and search past meetings.</p>
         </div>
       </div>
     </div>
@@ -346,21 +224,17 @@
   <!-- Download Section -->
   <section class="download" id="download">
     <div class="container">
-      <div class="download-card">
-        <div class="download-text">
-          <h2>Try Vantage for your next meeting</h2>
-          <p>Free and open source. Two API keys to get started.</p>
-        </div>
-        <div class="download-action">
+      <div class="download-content">
+        <h2>Ready to transform your meetings?</h2>
+        <p>Available for macOS. Free and open source.</p>
+        <div class="download-actions">
           <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.2.0/Vantage_0.2.0_aarch64.dmg" class="btn btn-primary btn-large">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-            Download for Mac
+            Download for macOS
           </a>
-          <span class="download-meta">v0.2.0 &middot; Apple Silicon &middot; 10 MB</span>
+          <span class="download-note">v0.2.0 &middot; Apple Silicon &middot; macOS 10.13+ &middot; 2 free API keys to start</span>
         </div>
-        <div class="download-note">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-          <span><strong>First launch:</strong> Right-click the app &rarr; "Open" to bypass Gatekeeper. You only need to do this once.</span>
+        <div class="install-note-box">
+          <p><strong>First launch:</strong> Right-click the app and select "Open" to bypass Gatekeeper. You only need to do this once.</p>
         </div>
       </div>
     </div>
@@ -376,10 +250,9 @@
         </div>
         <div class="footer-links">
           <a href="#features">Features</a>
-          <a href="#how-it-works">Setup</a>
+          <a href="#how-it-works">How It Works</a>
           <a href="#download">Download</a>
           <a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a>
-          <a href="https://github.com/venkateswarisudalai/MeetBetter/blob/main/TESTER_SETUP.md" target="_blank">Setup Guide</a>
           <a href="https://github.com/venkateswarisudalai/MeetBetter/issues" target="_blank">Report Issue</a>
         </div>
       </div>
