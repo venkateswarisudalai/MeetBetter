@@ -24,7 +24,7 @@ function setupNavbarScroll() {
   const navbar = document.querySelector('.navbar');
   window.addEventListener('scroll', () => {
     if (window.pageYOffset > 60) {
-      navbar.style.borderBottomColor = '#e5e5e3';
+      navbar.style.borderBottomColor = '#e2e8f0';
     } else {
       navbar.style.borderBottomColor = 'transparent';
     }
@@ -67,7 +67,7 @@ function closeMobileMenu() {
   }
 }
 
-// ===== Subtle Fade-in Animations =====
+// ===== Fade-in Animations =====
 function setupFadeAnimations() {
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -81,10 +81,19 @@ function setupFadeAnimations() {
     rootMargin: '0px 0px -60px 0px'
   });
 
-  document.querySelectorAll('.feature-row, .step, .download-content').forEach(el => {
+  const selectors = [
+    '.feature-card',
+    '.setup-step',
+    '.preview-card',
+    '.download-card',
+    '.works-with',
+    '.hero-mockup'
+  ];
+
+  document.querySelectorAll(selectors.join(', ')).forEach((el, i) => {
     el.style.opacity = '0';
     el.style.transform = 'translateY(20px)';
-    el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+    el.style.transition = `opacity 0.5s ease ${i * 0.05}s, transform 0.5s ease ${i * 0.05}s`;
     observer.observe(el);
   });
 }
