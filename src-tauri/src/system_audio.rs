@@ -2,7 +2,7 @@
 // Primary: ScreenCaptureKit (macOS 13+, zero config)
 // Fallback: BlackHole / Loopback / Soundflower (any macOS, requires user setup)
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Result};
 
@@ -165,18 +165,31 @@ mod macos {
             .with_excluding_windows(&[])
             .build();
 
-        // Minimal 2×2 video (required by API) + audio at matching sample rate, mono
+        // Minimal 2×2 video (required by API) + audio at 48000 Hz, mono
+        // SCK only supports 8000/16000/24000/48000 Hz — hardcode 48000 to avoid
+        // silent mismatch when mic runs at 44100 Hz (SCK would silently default to 48000)
         let config = SCStreamConfiguration::new()
             .with_width(2)
             .with_height(2)
             .with_captures_audio(true)
-            .with_sample_rate(sample_rate as i32)
+            .with_excludes_current_process_audio(true)
+            .with_sample_rate(48000)
             .with_channel_count(1); // mono — we only need one channel for system audio
+
+        eprintln!("SCK: configured sample_rate=48000 (mic sample_rate={}), excludes_current_process_audio=true", sample_rate);
+
+        // Diagnostic counters shared between AudioHandler and the keep-alive thread
+        let callback_count = Arc::new(AtomicU64::new(0));
+        let audio_sample_count = Arc::new(AtomicU64::new(0));
+        let empty_buffer_count = Arc::new(AtomicU64::new(0));
 
         // Handler that pushes audio samples into the shared buffer
         struct AudioHandler {
             system_buffer: Arc<Mutex<Vec<i16>>>,
             is_running: Arc<AtomicBool>,
+            callback_count: Arc<AtomicU64>,
+            audio_sample_count: Arc<AtomicU64>,
+            empty_buffer_count: Arc<AtomicU64>,
         }
 
         impl SCStreamOutputTrait for AudioHandler {
@@ -193,16 +206,28 @@ mod macos {
                     return; // ignore video frames
                 }
 
+                let cb_num = self.callback_count.fetch_add(1, Ordering::Relaxed) + 1;
+
                 // Extract audio data from the CMSampleBuffer
                 let audio_buffers = match sample.audio_buffer_list() {
                     Some(list) => list,
-                    None => return,
+                    None => {
+                        let empty_num = self.empty_buffer_count.fetch_add(1, Ordering::Relaxed) + 1;
+                        if empty_num <= 5 {
+                            eprintln!("SCK: audio_buffer_list() returned None (occurrence {})", empty_num);
+                        }
+                        return;
+                    }
                 };
 
                 // Process each audio buffer in the list
                 for buffer in audio_buffers.iter() {
                     let raw_bytes = buffer.data();
                     if raw_bytes.is_empty() {
+                        let empty_num = self.empty_buffer_count.fetch_add(1, Ordering::Relaxed) + 1;
+                        if empty_num <= 5 {
+                            eprintln!("SCK: buffer data is empty (occurrence {})", empty_num);
+                        }
                         continue;
                     }
 
@@ -219,6 +244,14 @@ mod macos {
                         .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
                         .collect();
 
+                    let sample_count = i16_samples.len() as u64;
+                    let prev_total = self.audio_sample_count.fetch_add(sample_count, Ordering::Relaxed);
+
+                    // Log on first successful audio frame
+                    if prev_total == 0 {
+                        eprintln!("SCK: first audio frame received ({} samples, callback #{})", sample_count, cb_num);
+                    }
+
                     if let Ok(mut buf) = self.system_buffer.lock() {
                         buf.extend(i16_samples);
                     }
@@ -229,6 +262,9 @@ mod macos {
         let handler = AudioHandler {
             system_buffer: system_buffer.clone(),
             is_running: is_running.clone(),
+            callback_count: callback_count.clone(),
+            audio_sample_count: audio_sample_count.clone(),
+            empty_buffer_count: empty_buffer_count.clone(),
         };
 
         let mut stream = SCStream::new(&filter, &config);
@@ -241,12 +277,36 @@ mod macos {
         eprintln!("ScreenCaptureKit system audio capture started");
 
         // Keep the stream alive on a background thread until is_running becomes false
+        // Also performs periodic health checks on SCK audio delivery
+        let health_callback_count = callback_count.clone();
+        let health_sample_count = audio_sample_count.clone();
+        let health_empty_count = empty_buffer_count.clone();
         std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let mut health_checked = false;
             while is_running.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
+
+                // Health check at 5 seconds
+                if !health_checked && start.elapsed().as_secs() >= 5 {
+                    health_checked = true;
+                    let cbs = health_callback_count.load(Ordering::Relaxed);
+                    let samples = health_sample_count.load(Ordering::Relaxed);
+                    let empties = health_empty_count.load(Ordering::Relaxed);
+
+                    if cbs == 0 {
+                        eprintln!("WARNING: ScreenCaptureKit not delivering audio frames after 5s (0 callbacks). Check Screen Recording permission.");
+                    } else if samples == 0 {
+                        eprintln!("WARNING: ScreenCaptureKit callbacks received ({}) but audio data is empty after 5s (empty_buffers={}). Permission may be granted but not effective — try toggling Screen Recording off/on.", cbs, empties);
+                    } else {
+                        eprintln!("SCK health check OK: {} callbacks, {} samples, {} empty buffers in first 5s", cbs, samples, empties);
+                    }
+                }
             }
             let _ = stream.stop_capture();
-            eprintln!("ScreenCaptureKit system audio capture stopped");
+            let total_cbs = health_callback_count.load(Ordering::Relaxed);
+            let total_samples = health_sample_count.load(Ordering::Relaxed);
+            eprintln!("ScreenCaptureKit stopped (total: {} callbacks, {} samples)", total_cbs, total_samples);
         });
 
         Ok(())

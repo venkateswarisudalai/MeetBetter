@@ -21,6 +21,13 @@ fn main() {
                 // Also try the non-versioned path
                 let clt_swift_path2 = format!("{}/usr/lib/swift/macosx", dev_path);
                 println!("cargo:rustc-link-arg=-Wl,-rpath,{}", clt_swift_path2);
+
+                // Xcode Toolchain path (when using full Xcode, the runtime is here)
+                let toolchain_swift_path = format!("{}/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.5/macosx", dev_path);
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{}", toolchain_swift_path);
+
+                let toolchain_swift_path2 = format!("{}/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx", dev_path);
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{}", toolchain_swift_path2);
             }
         }
     }

@@ -22,13 +22,15 @@ function setupSmoothScroll() {
 // ===== Navbar Scroll Effect =====
 function setupNavbarScroll() {
   const navbar = document.querySelector('.navbar');
-  window.addEventListener('scroll', () => {
-    if (window.pageYOffset > 60) {
-      navbar.style.borderBottomColor = '#e5e5e3';
+  const update = () => {
+    if (window.pageYOffset > 40) {
+      navbar.classList.add('scrolled');
     } else {
-      navbar.style.borderBottomColor = 'transparent';
+      navbar.classList.remove('scrolled');
     }
-  });
+  };
+  window.addEventListener('scroll', update, { passive: true });
+  update();
 }
 
 // ===== Mobile Menu =====
@@ -67,25 +69,62 @@ function closeMobileMenu() {
   }
 }
 
-// ===== Subtle Fade-in Animations =====
+// ===== Fade-in Animations =====
 function setupFadeAnimations() {
+  const easing = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
+  // Staggered IntersectionObserver
   const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('fade-in');
-        observer.unobserve(entry.target);
-      }
+    const visible = entries
+      .filter(e => e.isIntersecting)
+      .sort((a, b) => a.target.dataset.fadeIndex - b.target.dataset.fadeIndex);
+
+    visible.forEach((entry, i) => {
+      const delay = i * 0.1;
+      entry.target.style.transitionDelay = delay + 's';
+      entry.target.classList.add('fade-in');
+      observer.unobserve(entry.target);
     });
   }, {
-    threshold: 0.1,
+    threshold: 0.08,
     rootMargin: '0px 0px -60px 0px'
   });
 
-  document.querySelectorAll('.feature-row, .step, .download-content').forEach(el => {
+  // Hero elements — animate immediately with stagger
+  const heroEls = document.querySelectorAll('.hero-badge, .hero-title, .hero-subtitle, .hero-ctas, .hero-meta');
+  heroEls.forEach((el, i) => {
     el.style.opacity = '0';
     el.style.transform = 'translateY(20px)';
-    el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+    el.style.transition = `opacity 0.7s ${easing}, transform 0.7s ${easing}`;
+    el.style.transitionDelay = (0.1 + i * 0.1) + 's';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.classList.add('fade-in');
+      });
+    });
+  });
+
+  // Scrollable elements
+  let index = 0;
+  document.querySelectorAll('.platforms, .feature-card, .step-card, .download-card').forEach(el => {
+    el.dataset.fadeIndex = index++;
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(28px)';
+    el.style.transition = `opacity 0.7s ${easing}, transform 0.7s ${easing}`;
     observer.observe(el);
+  });
+}
+
+// ===== Marquee hover pause =====
+function setupMarquee() {
+  const scroll = document.querySelector('.platforms-scroll');
+  if (!scroll) return;
+
+  scroll.addEventListener('mouseenter', () => {
+    scroll.style.animationPlayState = 'paused';
+  });
+  scroll.addEventListener('mouseleave', () => {
+    scroll.style.animationPlayState = 'running';
   });
 }
 
@@ -103,6 +142,7 @@ function init() {
   setupMobileMenu();
   setupFadeAnimations();
   setupKeyboardNav();
+  setupMarquee();
 }
 
 if (document.readyState === 'loading') {

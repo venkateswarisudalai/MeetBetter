@@ -15,6 +15,39 @@ use crate::system_audio::{
     SystemAudioCaptureMethod, start_screencapturekit_capture,
 };
 
+/// Response from the proxy's /api/deepgram/token endpoint
+#[derive(Debug, Deserialize)]
+struct ProxyTokenResponse {
+    key: String,
+}
+
+/// Fetch a temporary Deepgram API key from the proxy server.
+/// Returns a short-lived key (5 min TTL) that can be used to connect directly to Deepgram.
+pub async fn fetch_temporary_key(proxy_url: &str) -> anyhow::Result<String> {
+    let url = format!("{}/api/deepgram/token", proxy_url.trim_end_matches('/'));
+    eprintln!("Fetching temporary Deepgram key from proxy: {}", url);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to reach proxy: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Proxy error ({}): {}", status, error_text));
+    }
+
+    let result: ProxyTokenResponse = response.json().await
+        .map_err(|e| anyhow::anyhow!("Invalid proxy response: {}", e))?;
+
+    eprintln!("Got temporary Deepgram key (length: {})", result.key.len());
+    Ok(result.key)
+}
+
 #[derive(Debug, Deserialize)]
 struct DeepgramResponse {
     #[serde(rename = "type")]
@@ -82,7 +115,7 @@ impl DeepgramTranscriber {
 
     /// Set up audio devices and start capturing. Call this ONCE before retrying WebSocket connections.
     /// This is the step that requests microphone permission from macOS.
-    pub fn setup_audio(&self) -> Result<AudioSetup> {
+    pub fn setup_audio(&self, app_handle: Option<AppHandle>) -> Result<AudioSetup> {
         // Get audio devices (this triggers the macOS microphone permission prompt)
         let host = cpal::default_host();
         let mic_device = host
@@ -118,6 +151,7 @@ impl DeepgramTranscriber {
         let is_running_audio_clone = is_running_audio.clone();
 
         // Audio capture thread — started once, lives until stop() is called
+        let app_handle_audio = app_handle.clone();
         std::thread::spawn(move || {
             let samples_per_100ms = sample_rate as usize / 10;
             let buffer_size_mono = samples_per_100ms * 2; // 16-bit = 2 bytes per sample
@@ -215,6 +249,12 @@ impl DeepgramTranscriber {
                     eprintln!("BlackHole system audio capture started (Channel 1 = Participants)");
                 }
 
+                // Early silence detection for system audio
+                let interleave_start = std::time::Instant::now();
+                let mut system_empty_ticks: u64 = 0;
+                let mut system_data_ticks: u64 = 0;
+                let mut silence_warning_emitted = false;
+
                 // Main loop: interleave audio and send (identical for SCK and BlackHole)
                 while is_running_audio_clone.load(Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -233,13 +273,40 @@ impl DeepgramTranscriber {
                     }
 
                     // Get system samples
+                    let system_had_data;
                     {
                         let mut buf = system_buffer.lock().unwrap();
                         if buf.len() >= samples_per_100ms {
                             system_samples = buf.drain(..samples_per_100ms).collect();
+                            system_had_data = true;
                         } else {
                             // Pad with silence if system audio is behind
                             system_samples = vec![0i16; samples_per_100ms];
+                            system_had_data = false;
+                        }
+                    }
+
+                    // Track system audio health
+                    if system_had_data {
+                        system_data_ticks += 1;
+                    } else {
+                        system_empty_ticks += 1;
+                    }
+
+                    // Early silence detection at 10 seconds
+                    if !silence_warning_emitted && interleave_start.elapsed().as_secs() >= 10 {
+                        if system_data_ticks == 0 && system_empty_ticks > 0 {
+                            eprintln!("WARNING: System audio buffer has been empty for 10s ({} empty ticks, 0 data ticks). System audio is not being captured.", system_empty_ticks);
+                            if let Some(ref app) = app_handle_audio {
+                                let _ = app.emit("system-audio-silent", serde_json::json!({
+                                    "message": "System audio capture is not receiving audio. Go to System Settings > Privacy & Security > Screen Recording, toggle Vantage off then on, and restart the app.",
+                                    "elapsed_secs": 10,
+                                }));
+                            }
+                            silence_warning_emitted = true;
+                        } else if system_data_ticks > 0 {
+                            eprintln!("System audio interleave healthy: {} data ticks, {} empty ticks in first 10s", system_data_ticks, system_empty_ticks);
+                            silence_warning_emitted = true;
                         }
                     }
 

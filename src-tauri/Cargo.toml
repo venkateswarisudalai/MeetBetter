@@ -1,6 +1,6 @@
 [package]
 name = "vantage"
-version = "0.2.0"
+version = "0.3.0"
 description = "Vantage - Privacy-focused real-time meeting transcription with AI-powered suggestions"
 authors = ["Venkateswari"]
 license = "MIT"
@@ -56,4 +56,7 @@ screencapturekit = "1.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[patch.crates-io]
+screencapturekit = { path = "screencapturekit-patch" }
 

@@ -76,6 +76,7 @@ function App() {
   // API keys state
   const [hasGroqKey, setHasGroqKey] = useState(false);
   const [hasDeepgramKey, setHasDeepgramKey] = useState(false);
+  const [hasProxy, setHasProxy] = useState(false);
   const [groqKeyInput, setGroqKeyInput] = useState("");
   const [deepgramKeyInput, setDeepgramKeyInput] = useState("");
   const [isEditingApiKey, setIsEditingApiKey] = useState(false);
@@ -145,6 +146,8 @@ function App() {
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
   const lastTranscriptCount = useRef(0);
   const lastReplyGenerationTime = useRef(0);
+  const userScrolledUp = useRef(false);
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
 
   // Computed app state
   type AppState = 'ready' | 'recording' | 'done';
@@ -278,20 +281,35 @@ function App() {
     return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  // Auto-scroll transcript
+  // Detect if user scrolled up in transcript panel
   useEffect(() => {
-    transcriptionEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = transcriptContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      // If user is within 100px of bottom, consider them "following"
+      userScrolledUp.current = scrollHeight - scrollTop - clientHeight > 100;
+    };
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [showTranscriptPanel, appState]);
+
+  // Auto-scroll transcript only when user hasn't scrolled up
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      transcriptionEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [transcription]);
 
   // Auto-generate replies when enabled
   useEffect(() => {
     if ((isLiveTranscribing || isMockTranscribing) && autoGenerateReplies && transcription.length > 0 && transcription.length !== lastTranscriptCount.current) {
       lastTranscriptCount.current = transcription.length;
-      const lastSpeaker = transcription[transcription.length - 1]?.speaker;
-      if (lastSpeaker === "You") return;
       const now = Date.now();
       const timeSinceLastGeneration = now - lastReplyGenerationTime.current;
-      if (timeSinceLastGeneration >= 5000 || lastReplyGenerationTime.current === 0) {
+      // Generate replies every 8 seconds regardless of speaker,
+      // since speaker detection may not always differentiate correctly
+      if (timeSinceLastGeneration >= 8000 || lastReplyGenerationTime.current === 0) {
         lastReplyGenerationTime.current = now;
         generateRepliesQuietly();
       }
@@ -373,10 +391,12 @@ function App() {
       const state = await invoke<{
         has_groq_key: boolean;
         has_deepgram_key: boolean;
+        has_proxy: boolean;
         meeting_context: string;
       }>("get_meeting_state");
       setHasGroqKey(state.has_groq_key);
       setHasDeepgramKey(state.has_deepgram_key);
+      setHasProxy(state.has_proxy);
       if (state.meeting_context) {
         setMeetingContext(state.meeting_context);
         setContextInput(state.meeting_context);
@@ -552,7 +572,7 @@ function App() {
 
   // Recording functions
   const handleStartLiveTranscription = async () => {
-    if (!hasGroqKey) return;
+    if (!hasGroqKey && !hasDeepgramKey && !hasProxy) return;
     try {
       await invoke("start_live_transcription");
       setIsLiveTranscribing(true);
@@ -575,7 +595,7 @@ function App() {
       setIsLiveTranscribing(false);
       if (audioPath) setSavedRecordingPath(audioPath);
 
-      if (hasGroqKey && transcription.length > 0) {
+      if ((hasGroqKey || hasProxy) && transcription.length > 0) {
         setIsGeneratingSummary(true);
         try {
           const summaryResult = await invoke<MeetingSummary>("generate_structured_summary");
@@ -614,7 +634,7 @@ function App() {
   };
 
   const generateRepliesQuietly = async () => {
-    if (isGeneratingReplies || !hasGroqKey) return;
+    if (isGeneratingReplies || (!hasGroqKey && !hasProxy)) return;
     setIsGeneratingReplies(true);
     setReplyError(null);
     try {
@@ -634,7 +654,7 @@ function App() {
   };
 
   const handleGenerateSummary = async () => {
-    if (transcription.length === 0 || !hasGroqKey) return;
+    if (transcription.length === 0 || (!hasGroqKey && !hasProxy)) return;
     setIsLoading(true);
     setIsGeneratingSummary(true);
     try {
@@ -660,7 +680,7 @@ function App() {
   };
 
   const handleEnhanceNotes = async () => {
-    if (!userNotes.trim() || !hasGroqKey) return;
+    if (!userNotes.trim() || (!hasGroqKey && !hasProxy)) return;
     setIsEnhancing(true);
     try {
       const result = await invoke<string>("enhance_notes", {
@@ -853,6 +873,60 @@ function App() {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const formatEventTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    const remainMins = mins % 60;
+    return remainMins > 0 ? `${hrs}h ${remainMins}m` : `${hrs}h`;
+  };
+
+  const getInitials = (email: string) => {
+    const name = email.split('@')[0];
+    const parts = name.split(/[._-]/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  const isEventHappeningNow = (event: CalendarEvent) => {
+    const now = new Date();
+    const start = new Date(event.start_time);
+    const end = new Date(event.end_time);
+    return now >= start && now <= end;
+  };
+
+  const renderEnhancedLine = (line: string, i: number) => {
+    const trimmed = line.trim();
+    if (!trimmed) return <br key={i} />;
+
+    // Parse timestamps like [12:34] or [1:23:45]
+    const parseTimestamps = (text: string) => {
+      const parts = text.split(/(\[\d{1,2}:\d{2}(?::\d{2})?\])/g);
+      return parts.map((part, j) => {
+        if (/^\[\d{1,2}:\d{2}(?::\d{2})?\]$/.test(part)) {
+          return <span key={j} className="timestamp-link">{part}</span>;
+        }
+        return part;
+      });
+    };
+
+    if (trimmed.startsWith('[USER]')) {
+      return <p key={i} className="user-note-line">{parseTimestamps(trimmed.replace('[USER]', '').trim())}</p>;
+    }
+    if (trimmed.startsWith('[AI]')) {
+      return <p key={i} className="ai-note-line">{parseTimestamps(trimmed.replace('[AI]', '').trim())}</p>;
+    }
+    if (trimmed.startsWith('#')) {
+      return <h3 key={i} className="enhanced-section-heading">{trimmed.replace(/^#+\s*/, '')}</h3>;
+    }
+    return <p key={i} className="ai-note-line">{parseTimestamps(trimmed)}</p>;
   };
 
   return (
@@ -1166,26 +1240,47 @@ function App() {
               {isCalendarConnected ? (
                 upcomingEvents.length > 0 ? (
                   <div className="event-list">
-                    {upcomingEvents.slice(0, 5).map((event) => (
-                      <div key={event.id} className={`event-item ${event.is_today ? 'today' : ''}`}>
-                        <div className="event-date">
-                          <span className="month">{new Date(event.start_time).toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}</span>
-                          <span className="day">{new Date(event.start_time).getDate()}</span>
+                    {upcomingEvents.slice(0, 5).map((event) => {
+                      const isNow = isEventHappeningNow(event);
+                      return (
+                        <div key={event.id} className={`event-item ${event.is_today ? 'today' : ''} ${isNow ? 'now' : ''}`}>
+                          <div className="event-time-col">
+                            <span className="event-time-start">{formatEventTime(event.start_time)}</span>
+                            <span className="event-time-end">{formatEventTime(event.end_time)}</span>
+                          </div>
+                          <div className="event-info">
+                            <span className="event-title">
+                              {event.title}
+                              {isNow && <span className="live-badge">LIVE</span>}
+                            </span>
+                            <div className="event-meta">
+                              {event.attendees.length > 0 && (
+                                <div className="event-attendees">
+                                  {event.attendees.slice(0, 3).map((a, i) => (
+                                    <span key={i} className="attendee-avatar" title={a}>{getInitials(a)}</span>
+                                  ))}
+                                  {event.attendees.length > 3 && (
+                                    <span className="attendee-avatar">+{event.attendees.length - 3}</span>
+                                  )}
+                                </div>
+                              )}
+                              {event.meeting_link && (
+                                <span className="meeting-link-indicator" title="Has meeting link">🔗</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="event-info">
-                          <span className="event-title">{event.title}</span>
-                          <span className="event-time">{formatDate(event.start_time)}</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="empty-state">No upcoming events</p>
                 )
               ) : (
-                <p className="empty-state">
-                  <button className="text-btn" onClick={() => setShowSettings(true)}>Connect Google Calendar</button>
-                </p>
+                <div className="connect-calendar-prompt">
+                  <p>See your schedule here</p>
+                  <button className="text-btn" onClick={() => setShowSettings(true)}>Connect Google Calendar →</button>
+                </div>
               )}
             </div>
 
@@ -1200,10 +1295,15 @@ function App() {
                       className="meeting-item"
                       onClick={() => handleViewMeeting(meeting)}
                     >
-                      <div className="meeting-icon">📄</div>
+                      <div className="meeting-icon">{meeting.summary ? '📋' : '📄'}</div>
                       <div className="meeting-info">
                         <span className="meeting-title">{meeting.title}</span>
-                        <span className="meeting-date">{formatDate(meeting.date)}</span>
+                        <span className="meeting-date">
+                          {formatDate(meeting.date)}
+                          {meeting.duration_seconds && (
+                            <> · <span className="meeting-duration-badge">{formatDuration(meeting.duration_seconds)}</span></>
+                          )}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -1224,7 +1324,7 @@ function App() {
 
           {/* Main Content */}
           <main className="main-content">
-            {!(hasGroqKey || hasDeepgramKey) ? (
+            {!(hasGroqKey || hasDeepgramKey || hasProxy) ? (
               <div className="setup-prompt">
                 <h1>Welcome to Vantage</h1>
                 <p>Real-time meeting transcription with AI summaries</p>
@@ -1326,11 +1426,12 @@ function App() {
             <div className="detail-meta">
               <span>{formatDate(selectedMeeting.date)}</span>
               {selectedMeeting.duration_seconds && (
-                <span>Duration: {formatTime(selectedMeeting.duration_seconds)}</span>
+                <span>{formatDuration(selectedMeeting.duration_seconds)}</span>
               )}
               {selectedMeeting.attendees.length > 0 && (
-                <span>Attendees: {selectedMeeting.attendees.join(', ')}</span>
+                <span>{selectedMeeting.attendees.length} attendee{selectedMeeting.attendees.length !== 1 ? 's' : ''}</span>
               )}
+              {selectedMeeting.summary && <span>Has summary</span>}
             </div>
 
             {/* User Notes */}
@@ -1419,10 +1520,22 @@ function App() {
             </div>
           </header>
 
+          {/* Warning: no system audio / diarize-only mode */}
+          {audioMode === 'diarize' && (
+            <div className="silence-warning-banner">
+              <span className="silence-warning-text">
+                Mono mode — can't separate your voice from system audio (YouTube, Zoom, etc.).
+                Grant <strong>Screen Recording</strong> permission in System Settings → Privacy & Security for speaker separation.
+              </span>
+              <button className="silence-warning-dismiss" onClick={() => setAudioMode(null)}>Dismiss</button>
+            </div>
+          )}
+
+          {/* Warning: system audio channel is silent despite stereo mode */}
           {systemAudioSilent && (
             <div className="silence-warning-banner">
               <span className="silence-warning-text">
-                {silenceMessage || "System audio is silent. Check that Screen Recording permission is granted in System Settings > Privacy & Security."}
+                {silenceMessage || "System audio channel is silent. Go to System Settings → Privacy & Security → Screen Recording and enable Vantage."}
               </span>
               <button className="silence-warning-dismiss" onClick={() => setSystemAudioSilent(false)}>Dismiss</button>
             </div>
@@ -1493,7 +1606,7 @@ function App() {
                 <div className="transcript-panel-header">
                   <span>Live Transcript</span>
                 </div>
-                <div className="transcript-panel-body">
+                <div className="transcript-panel-body" ref={transcriptContainerRef}>
                   {transcription.length === 0 ? (
                     <div className="empty-transcript"><p>Listening...</p></div>
                   ) : (
@@ -1561,25 +1674,12 @@ function App() {
               </section>
             )}
 
-            {/* Enhanced Notes Section */}
+            {/* Enhanced Notes Section — Two-Tone Display */}
             {enhancedNotes && (
               <section className="enhanced-notes">
                 <h2>Enhanced Notes</h2>
                 <div className="enhanced-notes-content">
-                  {enhancedNotes.split('\n').map((line, i) => {
-                    const trimmed = line.trim();
-                    if (!trimmed) return <br key={i} />;
-                    if (trimmed.startsWith('[USER]')) {
-                      return <p key={i} className="user-note-line">{trimmed.replace('[USER]', '').trim()}</p>;
-                    }
-                    if (trimmed.startsWith('[AI]')) {
-                      return <p key={i} className="ai-note-line">{trimmed.replace('[AI]', '').trim()}</p>;
-                    }
-                    if (trimmed.startsWith('#')) {
-                      return <h3 key={i} className="enhanced-section-heading">{trimmed.replace(/^#+\s*/, '')}</h3>;
-                    }
-                    return <p key={i} className="ai-note-line">{trimmed}</p>;
-                  })}
+                  {enhancedNotes.split('\n').map((line, i) => renderEnhancedLine(line, i))}
                 </div>
               </section>
             )}

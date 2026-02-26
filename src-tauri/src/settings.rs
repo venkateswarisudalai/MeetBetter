@@ -7,8 +7,14 @@ use std::path::PathBuf;
 pub const ENV_GROQ_API_KEY: &str = "VANTAGE_GROQ_API_KEY";
 pub const ENV_DEEPGRAM_API_KEY: &str = "VANTAGE_DEEPGRAM_API_KEY";
 pub const ENV_ASSEMBLYAI_API_KEY: &str = "VANTAGE_ASSEMBLYAI_API_KEY";
+pub const ENV_PROXY_URL: &str = "VANTAGE_PROXY_URL";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Default proxy URL baked into the build.
+/// Change this to your deployed Cloudflare Worker URL before building for distribution.
+/// Set to "" to disable demo mode by default.
+pub const DEFAULT_PROXY_URL: &str = "https://vantage-api-proxy.venkateswari1095.workers.dev";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub groq_api_key: String,
@@ -24,6 +30,29 @@ pub struct AppSettings {
     pub meeting_context: String,
     #[serde(default)]
     pub cloud_sync_enabled: bool,
+    /// Proxy URL for demo mode (e.g. "https://vantage-api-proxy.your-subdomain.workers.dev")
+    /// When set and personal API keys are empty, the app routes through this proxy.
+    #[serde(default = "default_proxy_url")]
+    pub proxy_url: String,
+}
+
+fn default_proxy_url() -> String {
+    DEFAULT_PROXY_URL.to_string()
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            groq_api_key: String::new(),
+            assemblyai_api_key: String::new(),
+            deepgram_api_key: String::new(),
+            selected_model: String::new(),
+            transcription_provider: String::new(),
+            meeting_context: String::new(),
+            cloud_sync_enabled: false,
+            proxy_url: DEFAULT_PROXY_URL.to_string(),
+        }
+    }
 }
 
 impl AppSettings {
@@ -103,6 +132,14 @@ impl AppSettings {
             if !key.is_empty() {
                 eprintln!("Using AssemblyAI API key from environment variable");
                 self.assemblyai_api_key = key;
+            }
+        }
+
+        // Proxy URL
+        if let Ok(url) = std::env::var(ENV_PROXY_URL) {
+            if !url.is_empty() {
+                eprintln!("Using proxy URL from environment variable");
+                self.proxy_url = url;
             }
         }
     }

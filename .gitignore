@@ -46,3 +46,9 @@ Thumbs.db
 
 # Local Netlify folder
 .netlify
+
+# Local screencapturekit patch (vendored dependency)
+src-tauri/screencapturekit-patch/
+
+# Build artifacts
+*.dmg

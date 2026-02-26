@@ -1,0 +1,23 @@
+name = "vantage-api-proxy"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Rate limiting KV namespace — create with:
+#   wrangler kv namespace create RATE_LIMIT
+# Then paste the id below
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "7b84d8a7e2a94d39a70b8bac5aebb5e4"
+
+# Set these secrets via:
+#   wrangler secret put GROQ_API_KEY
+#   wrangler secret put DEEPGRAM_API_KEY
+#   wrangler secret put DEEPGRAM_PROJECT_ID
+#
+# Get your Deepgram project ID from: https://console.deepgram.com → Settings → Project
+
+[vars]
+# Max API calls per IP per day (adjust as needed)
+DAILY_LIMIT = "50"
+# Max temporary Deepgram keys per IP per day
+DAILY_DEEPGRAM_TOKEN_LIMIT = "10"

@@ -50,6 +50,9 @@ pub struct AppState {
     pub groq_api_key: Arc<Mutex<String>>,
     pub assemblyai_api_key: Arc<Mutex<String>>,
     pub deepgram_api_key: Arc<Mutex<String>>,
+    /// Proxy URL for demo mode — when set and personal API keys are empty,
+    /// Groq calls route through the proxy and Deepgram uses temporary keys.
+    pub proxy_url: Arc<Mutex<String>>,
     pub audio_recorder: Arc<Mutex<Option<audio::AudioRecorder>>>,
     pub current_recording_path: Arc<Mutex<Option<String>>>,
     pub is_transcribing: Arc<Mutex<bool>>,
@@ -83,9 +86,15 @@ impl Default for AppState {
 
         // Use saved model or default
         let model = if saved_settings.selected_model.is_empty() {
-            "llama-3.1-8b-instant".to_string()
+            "llama-3.3-70b-versatile".to_string()
         } else {
-            saved_settings.selected_model.clone()
+            // Migrate deprecated models to new defaults
+            let saved = &saved_settings.selected_model;
+            if saved == "llama-3.2-90b-vision-preview" || saved == "llama-3.2-11b-vision-preview" || saved == "llama-3.1-70b-versatile" {
+                "llama-3.3-70b-versatile".to_string()
+            } else {
+                saved.clone()
+            }
         };
 
         eprintln!("Loaded settings - Groq key present: {}, Model: {}",
@@ -102,6 +111,7 @@ impl Default for AppState {
             groq_api_key: Arc::new(Mutex::new(saved_settings.groq_api_key.clone())),
             assemblyai_api_key: Arc::new(Mutex::new(saved_settings.assemblyai_api_key.clone())),
             deepgram_api_key: Arc::new(Mutex::new(saved_settings.deepgram_api_key.clone())),
+            proxy_url: Arc::new(Mutex::new(saved_settings.proxy_url.clone())),
             audio_recorder: Arc::new(Mutex::new(None)),
             current_recording_path: Arc::new(Mutex::new(None)),
             is_transcribing: Arc::new(Mutex::new(false)),
@@ -121,6 +131,20 @@ impl Default for AppState {
             supabase_client: Arc::new(Mutex::new(
                 Some(supabase::SupabaseClient::with_embedded_credentials())
             )),
+        }
+    }
+}
+
+impl AppState {
+    /// Get the proxy URL if configured and Groq key is empty (demo mode).
+    /// Returns Some(proxy_url) when the app should route through the proxy.
+    fn get_proxy_for_groq(&self) -> Option<String> {
+        let groq_key = self.groq_api_key.lock().ok()?;
+        let proxy = self.proxy_url.lock().ok()?;
+        if groq_key.is_empty() && !proxy.is_empty() {
+            Some(proxy.clone())
+        } else {
+            None
         }
     }
 }
@@ -215,6 +239,7 @@ pub struct MeetingState {
     pub has_groq_key: bool,
     pub has_assemblyai_key: bool,
     pub has_deepgram_key: bool,
+    pub has_proxy: bool,
     pub current_recording_path: Option<String>,
     pub meeting_context: String,
 }
@@ -276,15 +301,31 @@ async fn start_live_transcription(
 ) -> Result<(), String> {
     let provider = state.transcription_provider.lock().map_err(|e| e.to_string())?.clone();
     let groq_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
-    let deepgram_key = state.deepgram_api_key.lock().map_err(|e| e.to_string())?.clone();
+    let mut deepgram_key = state.deepgram_api_key.lock().map_err(|e| e.to_string())?.clone();
     let assemblyai_key = state.assemblyai_api_key.lock().map_err(|e| e.to_string())?.clone();
+    let proxy_url = state.proxy_url.lock().map_err(|e| e.to_string())?.clone();
+    let has_proxy = !proxy_url.is_empty();
+
+    // Demo mode: if Deepgram key is empty but proxy is configured, fetch a temporary key
+    if deepgram_key.is_empty() && has_proxy {
+        eprintln!("Demo mode: fetching temporary Deepgram key from proxy...");
+        match crate::deepgram::fetch_temporary_key(&proxy_url).await {
+            Ok(temp_key) => {
+                eprintln!("Got temporary Deepgram key for demo mode");
+                deepgram_key = temp_key;
+            }
+            Err(e) => {
+                eprintln!("Failed to get temporary Deepgram key: {}", e);
+                // Fall through — will try Groq or show error
+            }
+        }
+    }
 
     // Auto-select provider: prefer Deepgram (real-time) if available, else Groq (batch)
     let effective_provider = match provider {
         TranscriptionProvider::Deepgram => {
             if deepgram_key.is_empty() {
-                // Fallback to Groq if Deepgram key not set
-                if !groq_key.is_empty() {
+                if !groq_key.is_empty() || has_proxy {
                     eprintln!("Deepgram key not set, falling back to Groq Whisper");
                     TranscriptionProvider::Groq
                 } else {
@@ -295,8 +336,7 @@ async fn start_live_transcription(
             }
         }
         TranscriptionProvider::Groq => {
-            if groq_key.is_empty() {
-                // Fallback to Deepgram if Groq key not set
+            if groq_key.is_empty() && !has_proxy {
                 if !deepgram_key.is_empty() {
                     eprintln!("Groq key not set, falling back to Deepgram streaming");
                     TranscriptionProvider::Deepgram
@@ -587,7 +627,7 @@ async fn start_live_transcription(
 
             // Set up audio devices ONCE (this is what triggers the microphone permission prompt)
             // By doing this outside the retry loop, we avoid re-requesting permission on retries
-            let mut audio_setup = match transcriber.setup_audio() {
+            let mut audio_setup = match transcriber.setup_audio(Some(app.clone())) {
                 Ok(setup) => setup,
                 Err(e) => {
                     eprintln!("Failed to set up audio devices: {}", e);
@@ -810,6 +850,7 @@ async fn get_meeting_state(state: State<'_, AppState>) -> Result<MeetingState, S
     let has_groq_key = !state.groq_api_key.lock().map_err(|e| e.to_string())?.is_empty();
     let has_assemblyai_key = !state.assemblyai_api_key.lock().map_err(|e| e.to_string())?.is_empty();
     let has_deepgram_key = !state.deepgram_api_key.lock().map_err(|e| e.to_string())?.is_empty();
+    let has_proxy = !state.proxy_url.lock().map_err(|e| e.to_string())?.is_empty();
     let transcription_provider = state.transcription_provider.lock().map_err(|e| e.to_string())?.clone();
 
     Ok(MeetingState {
@@ -824,6 +865,7 @@ async fn get_meeting_state(state: State<'_, AppState>) -> Result<MeetingState, S
         has_groq_key,
         has_assemblyai_key,
         has_deepgram_key,
+        has_proxy,
         current_recording_path: state.current_recording_path.lock().map_err(|e| e.to_string())?.clone(),
         meeting_context: state.meeting_context.lock().map_err(|e| e.to_string())?.clone(),
     })
@@ -901,6 +943,20 @@ async fn set_deepgram_api_key(state: State<'_, AppState>, key: String) -> Result
     } else {
         Ok(false)
     }
+}
+
+#[tauri::command]
+async fn set_proxy_url(state: State<'_, AppState>, url: String) -> Result<bool, String> {
+    *state.proxy_url.lock().map_err(|e| e.to_string())? = url.clone();
+
+    // Persist to disk
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.proxy_url = url;
+    if let Err(e) = settings.save() {
+        eprintln!("Failed to persist settings: {}", e);
+    }
+
+    Ok(true)
 }
 
 #[tauri::command]
@@ -1035,7 +1091,7 @@ async fn clear_transcription(state: State<'_, AppState>) -> Result<(), String> {
 async fn transcribe_recording(state: State<'_, AppState>, file_path: String) -> Result<Vec<TranscriptSegment>, String> {
     let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() {
+    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
         return Err("Groq API key not set. Please add it in Settings.".to_string());
     }
 
@@ -1144,7 +1200,7 @@ MEETING TRANSCRIPT:
         transcript_text
     );
 
-    let summary = groq::generate(&api_key, &model, &prompt).await.map_err(|e| e.to_string())?;
+    let summary = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
     *state.summary.lock().map_err(|e| e.to_string())? = summary.clone();
     Ok(summary)
 }
@@ -1245,7 +1301,7 @@ MEETING TRANSCRIPT:
         transcript_text
     );
 
-    let response = groq::generate(&api_key, &model, &prompt).await.map_err(|e| e.to_string())?;
+    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
     eprintln!("Summary response from AI (first 500 chars): {}", &response.chars().take(500).collect::<String>());
 
     // Try to parse JSON response
@@ -1318,7 +1374,7 @@ async fn generate_reply_suggestions(
         recent_context, context
     );
 
-    let response = groq::generate(&api_key, &model, &prompt).await.map_err(|e| e.to_string())?;
+    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
 
     let replies: Vec<String> = response
         .lines()
@@ -1341,7 +1397,7 @@ async fn generate_auto_replies(
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
     let meeting_context = state.meeting_context.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() {
+    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
         return Err("Groq API key not set. Please add it in Settings.".to_string());
     }
 
@@ -1401,7 +1457,7 @@ LABEL: Sounds like competing priorities"#,
     );
 
     eprintln!("Generating contextual auto replies from transcript...");
-    let response = groq::generate(&api_key, &model, &prompt).await.map_err(|e| e.to_string())?;
+    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
     eprintln!("Got response from Groq");
 
     let replies: Vec<String> = response
@@ -1502,7 +1558,7 @@ async fn start_mock_transcription(
 
     // Get API key
     let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
-    if api_key.is_empty() {
+    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
         return Err("Groq API key not set. Please add it in Settings.".to_string());
     }
 
@@ -1820,7 +1876,7 @@ async fn enhance_notes(
     let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() {
+    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
         return Err("Groq API key not set".to_string());
     }
 
@@ -1855,7 +1911,7 @@ Group into sections: Key Points, Action Items, Decisions, Additional Context"#,
         user_notes, transcript_text
     );
 
-    let response = groq::generate(&api_key, &model, &prompt).await.map_err(|e| e.to_string())?;
+    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
     Ok(response)
 }
 
@@ -1996,6 +2052,7 @@ pub fn run() {
             set_groq_api_key,
             set_assemblyai_api_key,
             set_deepgram_api_key,
+            set_proxy_url,
             set_model,
             set_transcription_provider,
             set_meeting_context,

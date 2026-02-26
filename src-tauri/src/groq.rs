@@ -29,21 +29,28 @@ struct Choice {
     message: ChatMessage,
 }
 
-/// Available Groq models (all open-source)
+/// Available Groq models (current as of 2025)
 pub fn get_available_models() -> Vec<(&'static str, &'static str)> {
     vec![
-        ("llama-3.2-90b-vision-preview", "Llama 3.2 90B (Best)"),
-        ("llama-3.2-11b-vision-preview", "Llama 3.2 11B"),
-        ("llama-3.1-70b-versatile", "Llama 3.1 70B"),
+        ("llama-3.3-70b-versatile", "Llama 3.3 70B (Best)"),
         ("llama-3.1-8b-instant", "Llama 3.1 8B (Fast)"),
+        ("llama-3.3-70b-specdec", "Llama 3.3 70B SpecDec"),
         ("mixtral-8x7b-32768", "Mixtral 8x7B"),
         ("gemma2-9b-it", "Gemma 2 9B"),
     ]
 }
 
-/// Generate a response using Groq API with automatic rate limit retry
+/// Generate a response using Groq API with automatic rate limit retry.
+/// If `proxy_url` is provided, routes through the proxy (demo mode).
 pub async fn generate(api_key: &str, model: &str, prompt: &str) -> Result<String> {
-    if api_key.is_empty() {
+    generate_with_proxy(api_key, model, prompt, None).await
+}
+
+/// Generate a response, optionally routing through a proxy.
+pub async fn generate_with_proxy(api_key: &str, model: &str, prompt: &str, proxy_url: Option<&str>) -> Result<String> {
+    let use_proxy = proxy_url.is_some() && !proxy_url.unwrap().is_empty();
+
+    if api_key.is_empty() && !use_proxy {
         return Err(anyhow!("Groq API key not set. Get one free at console.groq.com"));
     }
 
@@ -67,31 +74,40 @@ pub async fn generate(api_key: &str, model: &str, prompt: &str) -> Result<String
         max_tokens: 1024,
     };
 
+    // Determine endpoint and auth
+    let (url, auth_header) = if use_proxy {
+        let proxy = proxy_url.unwrap().trim_end_matches('/');
+        eprintln!("Using proxy for Groq: {}/api/groq/chat", proxy);
+        (format!("{}/api/groq/chat", proxy), None)
+    } else {
+        (GROQ_API_URL.to_string(), Some(format!("Bearer {}", api_key)))
+    };
+
     // Retry with exponential backoff for rate limits
     const MAX_RETRIES: u32 = 5;
-    let mut retry_delay_ms: u64 = 1000;  // Start with 1 second
+    let mut retry_delay_ms: u64 = 1000;
 
     for attempt in 0..MAX_RETRIES {
-        let response = client
-            .post(GROQ_API_URL)
-            .header("Authorization", format!("Bearer {}", api_key))
+        let mut req = client
+            .post(&url)
             .header("Content-Type", "application/json")
             .json(&request)
-            .timeout(std::time::Duration::from_secs(60))
-            .send()
-            .await?;
+            .timeout(std::time::Duration::from_secs(60));
 
+        if let Some(ref auth) = auth_header {
+            req = req.header("Authorization", auth);
+        }
+
+        let response = req.send().await?;
         let status = response.status();
 
-        // Handle rate limit (429) with exponential backoff
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            // Try to get retry-after header
             let retry_after = response
                 .headers()
                 .get("retry-after")
                 .and_then(|h| h.to_str().ok())
                 .and_then(|s| s.parse::<u64>().ok())
-                .map(|s| s * 1000)  // Convert seconds to ms
+                .map(|s| s * 1000)
                 .unwrap_or(retry_delay_ms);
 
             let wait_time = retry_after.max(retry_delay_ms);
@@ -101,8 +117,17 @@ pub async fn generate(api_key: &str, model: &str, prompt: &str) -> Result<String
             );
 
             tokio::time::sleep(std::time::Duration::from_millis(wait_time)).await;
-            retry_delay_ms = (retry_delay_ms * 2).min(30000);  // Double up to 30s max
+            retry_delay_ms = (retry_delay_ms * 2).min(30000);
             continue;
+        }
+
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let error_text = response.text().await.unwrap_or_default();
+            eprintln!("Groq 403 Forbidden with model '{}': {}", request.model, error_text);
+            return Err(anyhow!(
+                "Groq API key rejected (403 Forbidden). Your API key may be invalid or expired. \
+                Please go to Settings and re-enter a valid key from console.groq.com/keys"
+            ));
         }
 
         if !status.is_success() {
@@ -130,7 +155,7 @@ pub async fn check_api_key(api_key: &str) -> Result<bool> {
     let client = reqwest::Client::new();
 
     let request = ChatRequest {
-        model: "llama-3.1-8b-instant".to_string(),
+        model: "llama-3.3-70b-versatile".to_string(),
         messages: vec![ChatMessage {
             role: "user".to_string(),
             content: "Hi".to_string(),
@@ -210,10 +235,17 @@ async fn extract_recent_audio(file_path: &str, max_size: usize) -> Result<Vec<u8
     Ok(result)
 }
 
-/// Transcribe audio file using Groq's Whisper API
-/// For files larger than MAX_WHISPER_FILE_SIZE, only transcribes the last portion
+/// Transcribe audio file using Groq's Whisper API.
+/// For files larger than MAX_WHISPER_FILE_SIZE, only transcribes the last portion.
+/// If `proxy_url` is provided, routes through the proxy (demo mode).
 pub async fn transcribe_audio(api_key: &str, file_path: &str) -> Result<String> {
-    if api_key.is_empty() {
+    transcribe_audio_with_proxy(api_key, file_path, None).await
+}
+
+pub async fn transcribe_audio_with_proxy(api_key: &str, file_path: &str, proxy_url: Option<&str>) -> Result<String> {
+    let use_proxy = proxy_url.is_some() && !proxy_url.unwrap().is_empty();
+
+    if api_key.is_empty() && !use_proxy {
         return Err(anyhow!("Groq API key not set"));
     }
 
@@ -225,11 +257,9 @@ pub async fn transcribe_audio(api_key: &str, file_path: &str) -> Result<String> 
     let metadata = tokio::fs::metadata(file_path).await?;
     let file_size = metadata.len();
 
-    // If file is small enough, read the whole thing
     let file_bytes = if file_size <= MAX_WHISPER_FILE_SIZE {
         tokio::fs::read(file_path).await?
     } else {
-        // File too large - extract only the last portion
         eprintln!("Large file detected ({}MB), extracting last {}MB for transcription",
             file_size / 1_000_000, MAX_WHISPER_FILE_SIZE / 1_000_000);
         extract_recent_audio(file_path, MAX_WHISPER_FILE_SIZE as usize).await?
@@ -242,7 +272,6 @@ pub async fn transcribe_audio(api_key: &str, file_path: &str) -> Result<String> 
 
     let client = reqwest::Client::new();
 
-    // Create multipart form
     let file_part = reqwest::multipart::Part::bytes(file_bytes)
         .file_name(file_name)
         .mime_str("audio/wav")?;
@@ -253,13 +282,23 @@ pub async fn transcribe_audio(api_key: &str, file_path: &str) -> Result<String> 
         .text("response_format", "json")
         .text("language", "en");
 
-    let response = client
-        .post(GROQ_WHISPER_URL)
-        .header("Authorization", format!("Bearer {}", api_key))
+    let (url, auth_header) = if use_proxy {
+        let proxy = proxy_url.unwrap().trim_end_matches('/');
+        (format!("{}/api/groq/whisper", proxy), None)
+    } else {
+        (GROQ_WHISPER_URL.to_string(), Some(format!("Bearer {}", api_key)))
+    };
+
+    let mut req = client
+        .post(&url)
         .multipart(form)
-        .timeout(std::time::Duration::from_secs(120))
-        .send()
-        .await?;
+        .timeout(std::time::Duration::from_secs(120));
+
+    if let Some(auth) = auth_header {
+        req = req.header("Authorization", auth);
+    }
+
+    let response = req.send().await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -271,9 +310,16 @@ pub async fn transcribe_audio(api_key: &str, file_path: &str) -> Result<String> 
     Ok(result.text)
 }
 
-/// Transcribe audio bytes directly (for real-time chunks)
+/// Transcribe audio bytes directly (for real-time chunks).
+/// If `proxy_url` is provided, routes through the proxy (demo mode).
 pub async fn transcribe_audio_bytes(api_key: &str, audio_bytes: Vec<u8>, file_name: &str) -> Result<String> {
-    if api_key.is_empty() {
+    transcribe_audio_bytes_with_proxy(api_key, audio_bytes, file_name, None).await
+}
+
+pub async fn transcribe_audio_bytes_with_proxy(api_key: &str, audio_bytes: Vec<u8>, file_name: &str, proxy_url: Option<&str>) -> Result<String> {
+    let use_proxy = proxy_url.is_some() && !proxy_url.unwrap().is_empty();
+
+    if api_key.is_empty() && !use_proxy {
         return Err(anyhow!("Groq API key not set"));
     }
 
@@ -283,7 +329,6 @@ pub async fn transcribe_audio_bytes(api_key: &str, audio_bytes: Vec<u8>, file_na
 
     let client = reqwest::Client::new();
 
-    // Create multipart form
     let file_part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name(file_name.to_string())
         .mime_str("audio/wav")?;
@@ -294,13 +339,23 @@ pub async fn transcribe_audio_bytes(api_key: &str, audio_bytes: Vec<u8>, file_na
         .text("response_format", "json")
         .text("language", "en");
 
-    let response = client
-        .post(GROQ_WHISPER_URL)
-        .header("Authorization", format!("Bearer {}", api_key))
+    let (url, auth_header) = if use_proxy {
+        let proxy = proxy_url.unwrap().trim_end_matches('/');
+        (format!("{}/api/groq/whisper", proxy), None)
+    } else {
+        (GROQ_WHISPER_URL.to_string(), Some(format!("Bearer {}", api_key)))
+    };
+
+    let mut req = client
+        .post(&url)
         .multipart(form)
-        .timeout(std::time::Duration::from_secs(60))
-        .send()
-        .await?;
+        .timeout(std::time::Duration::from_secs(60));
+
+    if let Some(auth) = auth_header {
+        req = req.header("Authorization", auth);
+    }
+
+    let response = req.send().await?;
 
     if !response.status().is_success() {
         let status = response.status();

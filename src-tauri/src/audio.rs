@@ -174,6 +174,12 @@ impl AudioRecorder {
 
                 let samples_per_100ms = sample_rate as usize / 10;
 
+                // Early silence detection for system audio
+                let interleave_start = std::time::Instant::now();
+                let mut system_empty_ticks: u64 = 0;
+                let mut system_data_ticks: u64 = 0;
+                let mut silence_warning_emitted = false;
+
                 // Main loop: interleave mic + system audio and write to WAV
                 while !stop_signal_clone.load(Ordering::SeqCst) {
                     thread::sleep(std::time::Duration::from_millis(50));
@@ -192,14 +198,34 @@ impl AudioRecorder {
                     }
 
                     // Get system samples
+                    let system_had_data;
                     {
                         let mut buf = system_buffer.lock().unwrap();
                         if buf.len() >= samples_per_100ms {
                             system_samples = buf.drain(..samples_per_100ms).collect();
+                            system_had_data = true;
                         } else {
                             // Pad with silence if system audio is behind
                             system_samples = vec![0i16; samples_per_100ms];
+                            system_had_data = false;
                         }
+                    }
+
+                    // Track system audio health
+                    if system_had_data {
+                        system_data_ticks += 1;
+                    } else {
+                        system_empty_ticks += 1;
+                    }
+
+                    // Early silence detection at 10 seconds
+                    if !silence_warning_emitted && interleave_start.elapsed().as_secs() >= 10 {
+                        if system_data_ticks == 0 && system_empty_ticks > 0 {
+                            eprintln!("AudioRecorder WARNING: System audio buffer empty for 10s ({} empty ticks). Recording will have silent system channel.", system_empty_ticks);
+                        } else if system_data_ticks > 0 {
+                            eprintln!("AudioRecorder: System audio interleave healthy ({} data ticks, {} empty ticks in first 10s)", system_data_ticks, system_empty_ticks);
+                        }
+                        silence_warning_emitted = true;
                     }
 
                     // Write interleaved stereo samples to WAV
