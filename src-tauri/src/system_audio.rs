@@ -81,34 +81,40 @@ mod macos {
 
     /// Determine the best available system audio capture backend.
     /// Priority: ScreenCaptureKit → BlackHole → None
+    /// Result is cached per app session to avoid re-triggering permission prompts.
     pub fn get_system_audio_backend() -> SystemAudioCaptureMethod {
-        // Try ScreenCaptureKit first (macOS 13+)
-        if is_macos_13_or_later() {
-            if check_screencapturekit_permission() {
-                eprintln!("System audio: ScreenCaptureKit (permission granted)");
-                return SystemAudioCaptureMethod::ScreenCaptureKit;
+        use std::sync::OnceLock;
+        static CACHED: OnceLock<SystemAudioCaptureMethod> = OnceLock::new();
+
+        *CACHED.get_or_init(|| {
+            // Try ScreenCaptureKit first (macOS 13+)
+            if is_macos_13_or_later() {
+                if check_screencapturekit_permission() {
+                    eprintln!("System audio: ScreenCaptureKit (permission granted)");
+                    return SystemAudioCaptureMethod::ScreenCaptureKit;
+                }
+                // Permission not yet granted — request it. If the user hasn't
+                // responded yet, we fall through to BlackHole for this session.
+                eprintln!("System audio: Requesting Screen Recording permission...");
+                request_screencapturekit_permission();
+
+                // Re-check after request (will be true if already authorized)
+                if check_screencapturekit_permission() {
+                    eprintln!("System audio: ScreenCaptureKit (permission just granted)");
+                    return SystemAudioCaptureMethod::ScreenCaptureKit;
+                }
+                eprintln!("System audio: Screen Recording permission pending/denied");
             }
-            // Permission not yet granted — request it. If the user hasn't
-            // responded yet, we fall through to BlackHole for this session.
-            eprintln!("System audio: Requesting Screen Recording permission...");
-            request_screencapturekit_permission();
 
-            // Re-check after request (will be true if already authorized)
-            if check_screencapturekit_permission() {
-                eprintln!("System audio: ScreenCaptureKit (permission just granted)");
-                return SystemAudioCaptureMethod::ScreenCaptureKit;
+            // Fallback: look for virtual audio devices
+            if get_blackhole_device().is_some() {
+                eprintln!("System audio: BlackHole fallback");
+                return SystemAudioCaptureMethod::BlackHole;
             }
-            eprintln!("System audio: Screen Recording permission pending/denied");
-        }
 
-        // Fallback: look for virtual audio devices
-        if get_blackhole_device().is_some() {
-            eprintln!("System audio: BlackHole fallback");
-            return SystemAudioCaptureMethod::BlackHole;
-        }
-
-        eprintln!("System audio: None (mono mic only)");
-        SystemAudioCaptureMethod::None
+            eprintln!("System audio: None (mono mic only)");
+            SystemAudioCaptureMethod::None
+        })
     }
 
     /// Get the BlackHole / Loopback / Soundflower device if available
