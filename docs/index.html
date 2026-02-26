@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vantage - AI Meeting Assistant</title>
+
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="Never lose a meeting insight again. Vantage captures real-time transcripts, generates AI summaries, and keeps everything private on your device.">
+  <meta name="keywords" content="meeting transcription, AI transcription, meeting notes, real-time transcription, Zoom transcription, Google Meet transcription">
+  <meta name="author" content="Vantage">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://vantage-meeting-app.netlify.app/">
+  <meta property="og:title" content="Vantage - AI Meeting Assistant">
+  <meta property="og:description" content="Never lose a meeting insight again. Real-time transcription and AI summaries, all on-device.">
+  <meta property="og:image" content="https://vantage-meeting-app.netlify.app/images/og-image.png">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://vantage-meeting-app.netlify.app/">
+  <meta property="twitter:title" content="Vantage - AI Meeting Assistant">
+  <meta property="twitter:description" content="Never lose a meeting insight again. Real-time transcription and AI summaries, all on-device.">
+  <meta property="twitter:image" content="https://vantage-meeting-app.netlify.app/images/og-image.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/images/logo.svg">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="container">
+      <div class="nav-content">
+        <a href="#" class="logo">
+          <span class="logo-icon">V</span>
+          Vantage
+        </a>
+        <ul class="nav-links">
+          <li><a href="#features">Features</a></li>
+          <li><a href="#how-it-works">How It Works</a></li>
+          <li><a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a></li>
+          <li><a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.3.1/Vantage-0.3.1-universal.dmg" class="nav-cta"><svg class="apple-icon" width="14" height="14" viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-62.1 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>Download</a></li>
+        </ul>
+        <button class="mobile-menu-toggle" aria-label="Toggle menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero" id="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          Free &amp; Open Source
+        </div>
+        <h1 class="hero-title">Your meetings,<br><em>actually</em> captured</h1>
+        <p class="hero-subtitle">Real-time transcription and AI-powered summaries that stay on your device. Focus on the conversation, not your notes.</p>
+        <div class="hero-ctas">
+          <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.3.1/Vantage-0.3.1-universal.dmg" class="btn btn-primary"><svg class="apple-icon" width="16" height="16" viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-62.1 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>Download for macOS</a>
+          <a href="https://github.com/venkateswarisudalai/MeetBetter" class="btn btn-ghost" target="_blank">View on GitHub <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg></a>
+        </div>
+        <p class="hero-meta">v0.3.1 &middot; Intel + Apple Silicon &middot; macOS 12.3+</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Platform Strip -->
+  <section class="platforms">
+    <div class="platforms-track">
+      <div class="platforms-scroll">
+        <span class="platform-item">Zoom</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Google Meet</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Microsoft Teams</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Webex</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Slack Huddles</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Any Audio Source</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Zoom</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Google Meet</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Microsoft Teams</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Webex</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Slack Huddles</span>
+        <span class="platform-sep">&middot;</span>
+        <span class="platform-item">Any Audio Source</span>
+        <span class="platform-sep">&middot;</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Why Vantage</span>
+        <h2>Focus on the conversation,<br>not your notes</h2>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </div>
+          <h3>Real-time transcription</h3>
+          <p>Words appear as they're spoken with sub-second latency. Speaker labels show who said what.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <h3>AI-powered summaries</h3>
+          <p>Key points, action items, and decisions extracted automatically after every meeting.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          </div>
+          <h3>Private by design</h3>
+          <p>All processing stays on your device. No cloud uploads, no data collection, no account needed.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <h3>Screen share safe</h3>
+          <p>Automatically hides during presentations so participants never see your notes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works Section -->
+  <section class="how-it-works" id="how-it-works">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">How It Works</span>
+        <h2>Get started in under a minute</h2>
+      </div>
+      <div class="steps">
+        <div class="step-card">
+          <div class="step-number">1</div>
+          <h3>Download &amp; install</h3>
+          <p>Grab the macOS app. Add your free API keys for Deepgram and Groq in Settings.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">2</div>
+          <h3>Join your meeting</h3>
+          <p>Works with Zoom, Google Meet, Teams, and any audio source. Click "Start Meeting" in Vantage.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">3</div>
+          <h3>Review your insights</h3>
+          <p>Get a structured summary with key points, action items, and decisions. Save and search past meetings.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Download Section -->
+  <section class="download" id="download">
+    <div class="container">
+      <div class="download-card">
+        <div class="download-content">
+          <h2>Ready to try Vantage?</h2>
+          <p>Free, open source, privacy-first. No account needed.</p>
+          <div class="download-cta">
+            <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.3.1/Vantage-0.3.1-universal.dmg" class="btn btn-primary btn-large"><svg class="apple-icon" width="18" height="18" viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-62.1 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>Download for macOS</a>
+            <span class="download-meta">v0.3.1 &middot; Intel + Apple Silicon &middot; macOS 12.3+</span>
+          </div>
+          <div class="install-steps">
+            <h3>Installation Steps</h3>
+            <ol>
+              <li><strong>Download &amp; extract</strong> &mdash; Double-click the <code>.tar.gz</code> file to unarchive <code>Vantage.app</code></li>
+              <li><strong>Move to Applications</strong> &mdash; Drag <code>Vantage.app</code> into your <code>/Applications</code> folder</li>
+              <li><strong>Clear quarantine (one-time)</strong> &mdash; Open Terminal and run:<br>
+                <code class="install-command">xattr -cr /Applications/Vantage.app</code>
+              </li>
+              <li><strong>Launch &amp; grant permissions</strong> &mdash; On first launch, macOS will ask for two separate permissions:
+                <ul>
+                  <li><strong>Microphone</strong> &mdash; needed to capture your voice</li>
+                  <li><strong>Screen Recording</strong> &mdash; needed to capture system audio from Zoom/Meet/Teams</li>
+                </ul>
+                These are different macOS permissions and both are required. After granting once, macOS remembers them.
+              </li>
+            </ol>
+          </div>
+          <div class="install-note">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <p>Prefer DMG? <a href="https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.3.1/Vantage-0.3.1-universal.dmg">Download the .dmg instead</a> &mdash; you may need to right-click &rarr; "Open" to bypass Gatekeeper.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <span class="footer-logo">Vantage</span>
+          <p>AI meeting assistant. Free, open-source, privacy-first.</p>
+        </div>
+        <div class="footer-links">
+          <div class="footer-col">
+            <h4>Product</h4>
+            <a href="#features">Features</a>
+            <a href="#how-it-works">How It Works</a>
+            <a href="#download">Download</a>
+          </div>
+          <div class="footer-col">
+            <h4>Resources</h4>
+            <a href="https://github.com/venkateswarisudalai/MeetBetter" target="_blank">GitHub</a>
+            <a href="https://github.com/venkateswarisudalai/MeetBetter#setup" target="_blank">Setup Guide</a>
+            <a href="https://github.com/venkateswarisudalai/MeetBetter/issues" target="_blank">Report Issue</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2025 Vantage. Open source under MIT License.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/main.js"></script>
+</body>
+</html>
