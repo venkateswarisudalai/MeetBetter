@@ -255,12 +255,21 @@ impl DeepgramTranscriber {
                 let mut system_data_ticks: u64 = 0;
                 let mut silence_warning_emitted = false;
 
+                // SCK always outputs at 48000Hz regardless of mic rate.
+                // Calculate how many SCK samples correspond to one mic tick.
+                let sck_rate: u32 = if capture_method == SystemAudioCaptureMethod::ScreenCaptureKit { 48000 } else { sample_rate };
+                let sys_samples_per_100ms = (sck_rate as usize) / 10; // e.g. 4800 for 48000Hz
+                let need_resample = sck_rate != sample_rate;
+                if need_resample {
+                    eprintln!("Audio interleave: mic={}Hz, system={}Hz — will resample system audio", sample_rate, sck_rate);
+                }
+
                 // Main loop: interleave audio and send (identical for SCK and BlackHole)
                 while is_running_audio_clone.load(Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
 
                     let mic_samples: Vec<i16>;
-                    let system_samples: Vec<i16>;
+                    let raw_system_samples: Vec<i16>;
 
                     // Get mic samples
                     {
@@ -272,19 +281,39 @@ impl DeepgramTranscriber {
                         }
                     }
 
-                    // Get system samples
+                    // Get system samples (drain at system rate, then resample to mic rate)
                     let system_had_data;
                     {
                         let mut buf = system_buffer.lock().unwrap();
-                        if buf.len() >= samples_per_100ms {
-                            system_samples = buf.drain(..samples_per_100ms).collect();
+                        if buf.len() >= sys_samples_per_100ms {
+                            raw_system_samples = buf.drain(..sys_samples_per_100ms).collect();
+                            system_had_data = true;
+                        } else if buf.len() >= samples_per_100ms {
+                            // Some data available, just not a full SCK tick
+                            raw_system_samples = buf.drain(..samples_per_100ms).collect();
                             system_had_data = true;
                         } else {
                             // Pad with silence if system audio is behind
-                            system_samples = vec![0i16; samples_per_100ms];
+                            raw_system_samples = vec![0i16; samples_per_100ms];
                             system_had_data = false;
                         }
                     }
+
+                    // Resample system audio to match mic sample rate (linear interpolation)
+                    let system_samples: Vec<i16> = if need_resample && system_had_data && raw_system_samples.len() != samples_per_100ms {
+                        let src_len = raw_system_samples.len() as f64;
+                        let dst_len = samples_per_100ms;
+                        (0..dst_len).map(|i| {
+                            let src_pos = (i as f64) * src_len / (dst_len as f64);
+                            let idx = src_pos as usize;
+                            let frac = src_pos - idx as f64;
+                            let s0 = raw_system_samples[idx.min(raw_system_samples.len() - 1)] as f64;
+                            let s1 = raw_system_samples[(idx + 1).min(raw_system_samples.len() - 1)] as f64;
+                            (s0 + frac * (s1 - s0)) as i16
+                        }).collect()
+                    } else {
+                        raw_system_samples
+                    };
 
                     // Track system audio health
                     if system_had_data {

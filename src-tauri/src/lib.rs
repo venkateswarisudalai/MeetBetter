@@ -1533,6 +1533,27 @@ fn check_screen_recording_permission() -> bool {
     system_audio::check_screencapturekit_permission()
 }
 
+/// Check microphone permission status and optionally request it.
+/// Returns: "granted", "denied", or "undetermined"
+#[tauri::command]
+fn check_microphone_permission() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        // Use a quick, non-invasive check: try to list input devices
+        // If we can get the default input device, permission is granted
+        use cpal::traits::HostTrait;
+        let host = cpal::default_host();
+        match host.default_input_device() {
+            Some(_) => "granted".to_string(),
+            None => "denied".to_string(),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "granted".to_string()
+    }
+}
+
 /// Get platform info about screen share exclusion support
 #[tauri::command]
 fn get_screen_share_platform_info() -> String {
@@ -1915,6 +1936,48 @@ Group into sections: Key Points, Action Items, Decisions, Additional Context"#,
     Ok(response)
 }
 
+/// Ask AI a question about the meeting transcript and notes
+#[tauri::command]
+async fn ask_about_meeting(
+    state: State<'_, AppState>,
+    question: String,
+    user_notes: String,
+) -> Result<String, String> {
+    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
+    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
+    let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
+
+    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
+        return Err("No AI provider available".to_string());
+    }
+
+    let transcript_text: String = transcription
+        .iter()
+        .map(|s| format!("[{}] {}: {}", s.timestamp, s.speaker, s.text))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let prompt = format!(
+        r#"You are a helpful meeting assistant. Answer the user's question based on the meeting transcript and notes below. Be concise and direct.
+
+MEETING TRANSCRIPT:
+{}
+
+USER'S NOTES:
+{}
+
+QUESTION: {}
+
+Answer:"#,
+        if transcript_text.is_empty() { "(No transcript available)".to_string() } else { transcript_text },
+        if user_notes.trim().is_empty() { "(No notes taken)".to_string() } else { user_notes },
+        question
+    );
+
+    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    Ok(response)
+}
+
 // ============== Supabase Cloud Sync Commands ==============
 
 /// Toggle cloud sync on/off
@@ -2074,6 +2137,7 @@ pub fn run() {
             get_screen_share_platform_info,
             get_audio_diagnostics,
             check_screen_recording_permission,
+            check_microphone_permission,
             start_mock_transcription,
             stop_mock_transcription,
             // Calendar commands
@@ -2098,6 +2162,7 @@ pub fn run() {
             delete_meeting,
             search_meetings,
             enhance_notes,
+            ask_about_meeting,
             // Supabase cloud sync commands
             toggle_cloud_sync,
             sync_meetings_to_cloud,

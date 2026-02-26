@@ -1845,6 +1845,31 @@ body {
   max-width: 420px;
 }
 
+.permission-banner {
+  text-align: left;
+  background: rgba(224, 82, 82, 0.08);
+  border: 1px solid rgba(224, 82, 82, 0.2);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-6);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.permission-banner strong { color: var(--danger); }
+.permission-banner p { margin: 6px 0 0; line-height: 1.5; }
+.permission-banner code {
+  background: var(--border-light);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.permission-tip {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
 .setup-prompt h1, .start-section h1 {
   font-size: 26px;
   font-weight: 700;
@@ -1974,7 +1999,7 @@ body {
   background: var(--bg);
 }
 
-/* Recording Header — thin, clean */
+/* Recording Header — thin, clean, sticky so stop button is always visible */
 .recording-header {
   display: flex;
   align-items: center;
@@ -1983,6 +2008,9 @@ body {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   height: 44px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .recording-status {
@@ -2020,6 +2048,12 @@ body {
   background: rgba(232, 168, 48, 0.12);
   color: var(--warning);
   border: 1px solid rgba(232, 168, 48, 0.2);
+}
+
+.audio-mode-badge.warning {
+  background: rgba(224, 82, 82, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(224, 82, 82, 0.2);
 }
 
 /* System Audio Silence Warning Banner */
@@ -2639,6 +2673,85 @@ body {
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
+
+/* Ask AI Section */
+.ask-ai-section {
+  margin-top: var(--sp-8);
+  padding: var(--sp-5);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.ask-ai-section h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.ask-ai-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-bottom: var(--sp-4);
+}
+
+.ask-ai-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ask-ai-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  transition: all var(--transition);
+}
+
+.ask-ai-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
+.ask-ai-btn {
+  padding: 10px 20px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.ask-ai-btn:hover:not(:disabled) { opacity: 0.9; }
+.ask-ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ask-ai-answer {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  background: var(--accent-muted);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent);
+}
+
+.ask-ai-answer p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  margin: 0 0 4px 0;
+}
+
+.ask-ai-answer p:last-child { margin-bottom: 0; }
 
 /* Transcript Section */
 .transcript-section { margin-top: var(--sp-8); }

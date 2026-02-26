@@ -1,6 +1,6 @@
 [package]
 name = "vantage"
-version = "0.3.0"
+version = "0.3.1"
 description = "Vantage - Privacy-focused real-time meeting transcription with AI-powered suggestions"
 authors = ["Venkateswari"]
 license = "MIT"

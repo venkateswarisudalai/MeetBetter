@@ -123,6 +123,7 @@ function App() {
   const [captureMethod, setCaptureMethod] = useState<string | null>(null);
   const [systemAudioSilent, setSystemAudioSilent] = useState(false);
   const [silenceMessage, setSilenceMessage] = useState<string | null>(null);
+  const [micPermission, setMicPermission] = useState<"granted" | "denied" | "checking">("checking");
 
   // Recording state
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
@@ -141,6 +142,9 @@ function App() {
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(true);
   const [enhancedNotes, setEnhancedNotes] = useState<string | null>(null);
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [askAiQuestion, setAskAiQuestion] = useState("");
+  const [askAiAnswer, setAskAiAnswer] = useState("");
+  const [isAskingAi, setIsAskingAi] = useState(false);
   const notepadRef = useRef<HTMLDivElement>(null);
 
   const transcriptionEndRef = useRef<HTMLDivElement>(null);
@@ -162,6 +166,10 @@ function App() {
     checkCalendarConnection();
     loadPastMeetings();
     checkCloudSyncStatus();
+    // Check microphone permission early
+    invoke<string>("check_microphone_permission").then((status) => {
+      setMicPermission(status === "granted" ? "granted" : "denied");
+    }).catch(() => setMicPermission("granted")); // assume granted if check fails
   }, []);
 
   // Load calendar events when connected
@@ -694,6 +702,24 @@ function App() {
     }
   };
 
+  const handleAskAboutMeeting = async () => {
+    if (!askAiQuestion.trim() || (!hasGroqKey && !hasProxy)) return;
+    setIsAskingAi(true);
+    setAskAiAnswer("");
+    try {
+      const result = await invoke<string>("ask_about_meeting", {
+        question: askAiQuestion.trim(),
+        userNotes: userNotes.trim(),
+      });
+      setAskAiAnswer(result);
+    } catch (error) {
+      console.error("Failed to ask AI:", error);
+      setAskAiAnswer("Sorry, I couldn't process your question. Please try again.");
+    } finally {
+      setIsAskingAi(false);
+    }
+  };
+
   const handleClearAll = async () => {
     try {
       await invoke("clear_transcription");
@@ -704,6 +730,8 @@ function App() {
       setSavedRecordingPath(null);
       setUserNotes("");
       setEnhancedNotes(null);
+      setAskAiQuestion("");
+      setAskAiAnswer("");
       setCurrentCalendarEventId(null);
       setViewMode('home');
     } catch (error) {
@@ -1354,6 +1382,13 @@ function App() {
               </div>
             ) : (
               <div className="start-section">
+                {micPermission === "denied" && (
+                  <div className="permission-banner">
+                    <strong>Microphone access required</strong>
+                    <p>Go to <strong>System Settings → Privacy & Security → Microphone</strong> and enable Vantage. Then restart the app.</p>
+                    <p className="permission-tip">If permission keeps being asked: Right-click the app → Open, or run <code>xattr -cr /Applications/Vantage.app</code> in Terminal to remove quarantine.</p>
+                  </div>
+                )}
                 <h1>What kind of meeting?</h1>
                 <div className="meeting-types">
                   {Object.entries(meetingPresets).map(([key, preset]) => (
@@ -1367,16 +1402,14 @@ function App() {
                   ))}
                 </div>
 
-                {meetingType === 'custom' && (
-                  <textarea
-                    className="context-textarea"
-                    placeholder="Describe the meeting context..."
-                    value={contextInput}
-                    onChange={(e) => setContextInput(e.target.value)}
-                    onBlur={handleSaveContext}
-                    rows={2}
-                  />
-                )}
+                <textarea
+                  className="context-textarea"
+                  placeholder="Describe the meeting context — e.g. 'Weekly standup with engineering team' or 'Interview for senior frontend role'. This helps AI generate better suggestions and summaries."
+                  value={contextInput}
+                  onChange={(e) => setContextInput(e.target.value)}
+                  onBlur={handleSaveContext}
+                  rows={2}
+                />
 
                 <button
                   className="primary-btn large start-btn"
@@ -1496,10 +1529,15 @@ function App() {
               </div>
               <span className="rec-time">{formatTime(recordingTime)}</span>
               {audioMode && (
-                <span className={`audio-mode-badge ${audioMode}`}>
+                <span className={`audio-mode-badge ${audioMode} ${systemAudioSilent ? 'warning' : ''}`}
+                  title={audioMode === "multichannel"
+                    ? `Stereo mode (${captureMethod || 'unknown'}): Channel 0 = You, Channel 1 = Participant`
+                    : "Mono mode with AI diarization — speaker separation may be less accurate"
+                  }
+                >
                   {audioMode === "multichannel"
-                    ? (captureMethod === "ScreenCaptureKit" ? "SCK Stereo" : "Stereo")
-                    : "Diarize"}
+                    ? (systemAudioSilent ? "Stereo (no system audio)" : captureMethod === "ScreenCaptureKit" ? "SCK Stereo" : "Stereo")
+                    : "Mono (diarize)"}
                 </span>
               )}
             </div>
@@ -1524,8 +1562,8 @@ function App() {
           {audioMode === 'diarize' && (
             <div className="silence-warning-banner">
               <span className="silence-warning-text">
-                Mono mode — can't separate your voice from system audio (YouTube, Zoom, etc.).
-                Grant <strong>Screen Recording</strong> permission in System Settings → Privacy & Security for speaker separation.
+                <strong>Mono mode</strong> — Using AI to guess who's speaking (less accurate).
+                For reliable "You" vs "Participant" labels, grant <strong>Screen Recording</strong> permission in System Settings → Privacy & Security → Screen Recording, then restart.
               </span>
               <button className="silence-warning-dismiss" onClick={() => setAudioMode(null)}>Dismiss</button>
             </div>
@@ -1720,6 +1758,39 @@ function App() {
                 <div className="empty-summary"><p>Click "Generate" to create a meeting summary</p></div>
               )}
             </section>
+
+            {/* Ask AI Section */}
+            {(hasGroqKey || hasProxy) && (
+              <section className="ask-ai-section">
+                <h2>Ask AI</h2>
+                <p className="ask-ai-hint">Ask a question about this meeting — e.g. "What were the main action items?" or "Summarize what John said"</p>
+                <div className="ask-ai-input-row">
+                  <input
+                    type="text"
+                    className="ask-ai-input"
+                    placeholder="Ask a question about your meeting..."
+                    value={askAiQuestion}
+                    onChange={(e) => setAskAiQuestion(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAskAboutMeeting(); }}
+                    disabled={isAskingAi}
+                  />
+                  <button
+                    className="ask-ai-btn"
+                    onClick={handleAskAboutMeeting}
+                    disabled={isAskingAi || !askAiQuestion.trim()}
+                  >
+                    {isAskingAi ? "Thinking..." : "Ask"}
+                  </button>
+                </div>
+                {askAiAnswer && (
+                  <div className="ask-ai-answer">
+                    {askAiAnswer.split('\n').map((line, i) => (
+                      <p key={i}>{line}</p>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
 
             {/* Transcript Section */}
             <section className="transcript-section">
