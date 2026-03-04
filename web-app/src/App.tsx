@@ -84,7 +84,7 @@ function App() {
     return transcript
       .filter(l => l.isFinal)
       .map(l => {
-        const speaker = l.speaker !== undefined ? `Speaker ${l.speaker + 1}` : 'You';
+        const speaker = (l.speaker === undefined || l.speaker === 0) ? 'You' : `Participant ${l.speaker}`;
         return `[${speaker}]: ${l.text}`;
       })
       .join('\n');
@@ -165,7 +165,7 @@ function App() {
     const fullTranscript = transcript
       .filter(l => l.isFinal)
       .map(l => {
-        const speaker = l.speaker !== undefined ? `Speaker ${l.speaker + 1}` : 'You';
+        const speaker = (l.speaker === undefined || l.speaker === 0) ? 'You' : `Participant ${l.speaker}`;
         return `[${speaker}]: ${l.text}`;
       })
       .join('\n');
@@ -259,7 +259,7 @@ function App() {
                     <h4>{m.title}</h4>
                     <p>{new Date(m.date).toLocaleDateString()} &middot; {formatDuration(m.duration)}</p>
                   </div>
-                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); deleteMeeting(m.id); setMeetings(getMeetings()); }}>
+                  <button className="btn-icon btn-delete" title="Delete meeting" onClick={(e) => { e.stopPropagation(); deleteMeeting(m.id); setMeetings(getMeetings()); }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                   </button>
                 </div>
@@ -301,10 +301,12 @@ function App() {
             <h3>Transcript</h3>
             <div className="transcript-box">
               {viewMeeting.transcript.split('\n').filter(l => l.trim()).map((line, i) => {
-                const isUser = line.startsWith('[You]') || line.startsWith('[Speaker 1]');
+                const isUser = line.startsWith('[You]');
+                const speakerMatch = line.match(/^\[(.*?)\]/);
+                const speakerLabel = isUser ? 'You' : (speakerMatch?.[1] || 'Participant');
                 return (
                   <div key={i} className={`chat-bubble-sm ${isUser ? 'chat-user-sm' : 'chat-participant-sm'}`}>
-                    <span className="chat-speaker-sm">{isUser ? 'You' : 'Participant'}</span>
+                    <span className="chat-speaker-sm">{speakerLabel}</span>
                     <span>{line.replace(/^\[.*?\]:\s*/, '')}</span>
                   </div>
                 );
@@ -562,7 +564,7 @@ function App() {
                   <h4>{m.title}</h4>
                   <p>{new Date(m.date).toLocaleDateString()} &middot; {formatDuration(m.duration)}</p>
                 </div>
-                <button className="btn-icon" onClick={(e) => { e.stopPropagation(); deleteMeeting(m.id); setMeetings(getMeetings()); }}>
+                <button className="btn-icon btn-delete" title="Delete meeting" onClick={(e) => { e.stopPropagation(); deleteMeeting(m.id); setMeetings(getMeetings()); }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                 </button>
               </div>

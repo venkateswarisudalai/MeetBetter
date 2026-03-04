@@ -229,10 +229,10 @@ test.describe('Verify: Full meeting conversation', () => {
     await page.locator('button', { hasText: 'Copy Transcript' }).click();
     await expect(page.locator('button', { hasText: 'Copied!' })).toBeVisible({ timeout: 3000 });
     const clipText = await page.evaluate(() => navigator.clipboard.readText());
-    // Speaker 0 → [Speaker 1], Speaker 1 → [Speaker 2], Speaker 2 → [Speaker 3]
-    expect(clipText).toContain('[Speaker 1]: Hi team lets get started');
-    expect(clipText).toContain('[Speaker 2]: Sounds good');
-    expect(clipText).toContain('[Speaker 3]: We migrated to the new database');
+    // Speaker 0 → [You], Speaker 1 → [Participant 1], Speaker 2 → [Participant 2]
+    expect(clipText).toContain('[You]: Hi team lets get started');
+    expect(clipText).toContain('[Participant 1]: Sounds good');
+    expect(clipText).toContain('[Participant 2]: We migrated to the new database');
   });
 });
 

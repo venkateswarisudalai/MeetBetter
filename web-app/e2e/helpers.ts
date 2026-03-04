@@ -18,7 +18,7 @@ export const SEED_MEETING = {
   title: 'Engineering standup',
   date: new Date('2024-01-15T10:00:00Z').toISOString(),
   duration: 300,
-  transcript: '[You]: Hello everyone.\n[Speaker 2]: Hi there.',
+  transcript: '[You]: Hello everyone.\n[Participant 1]: Hi there.',
   summary: '## Summary\nQuick engineering standup.',
   context: 'Engineering standup',
 };

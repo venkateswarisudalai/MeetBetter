@@ -75,6 +75,9 @@ body {
 }
 .btn-icon:hover { background: var(--bg-muted); color: var(--text); }
 
+.btn-delete { position: relative; z-index: 2; min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
+.btn-delete:hover { border-color: var(--red); color: var(--red); background: #fef2f2; }
+
 /* ===== Header ===== */
 .page-header {
   display: flex;
