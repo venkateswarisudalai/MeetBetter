@@ -366,3 +366,118 @@ pub async fn transcribe_audio_bytes_with_proxy(api_key: &str, audio_bytes: Vec<u
     let result: WhisperResponse = response.json().await?;
     Ok(result.text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_available_models_not_empty() {
+        let models = get_available_models();
+        assert!(!models.is_empty());
+    }
+
+    #[test]
+    fn test_get_available_models_has_default() {
+        let models = get_available_models();
+        let has_default = models.iter().any(|(id, _)| *id == "llama-3.3-70b-versatile");
+        assert!(has_default, "Default model llama-3.3-70b-versatile should be available");
+    }
+
+    #[test]
+    fn test_get_available_models_all_have_labels() {
+        let models = get_available_models();
+        for (id, label) in &models {
+            assert!(!id.is_empty(), "Model ID should not be empty");
+            assert!(!label.is_empty(), "Model label should not be empty");
+        }
+    }
+
+    #[test]
+    fn test_chat_message_serialization() {
+        let msg = ChatMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"content\":\"Hello\""));
+    }
+
+    #[test]
+    fn test_chat_message_deserialization() {
+        let json = r#"{"role":"assistant","content":"Hi there"}"#;
+        let msg: ChatMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content, "Hi there");
+    }
+
+    #[test]
+    fn test_chat_request_serialization() {
+        let req = ChatRequest {
+            model: "llama-3.3-70b-versatile".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "test".to_string(),
+            }],
+            temperature: 0.7,
+            max_tokens: 1024,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("llama-3.3-70b-versatile"));
+        assert!(json.contains("\"max_tokens\":1024"));
+    }
+
+    #[test]
+    fn test_whisper_response_deserialization() {
+        let json = r#"{"text":"Hello world, this is a test."}"#;
+        let resp: WhisperResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.text, "Hello world, this is a test.");
+    }
+
+    #[test]
+    fn test_whisper_response_empty_text() {
+        let json = r#"{"text":""}"#;
+        let resp: WhisperResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_empty_key_no_proxy_errors() {
+        let result = generate("", "llama-3.3-70b-versatile", "Hello").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("API key not set"), "Expected API key error, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_transcribe_audio_bytes_too_short() {
+        let short_bytes = vec![0u8; 100]; // Way too short
+        let result = transcribe_audio_bytes("fake-key", short_bytes, "test.wav").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("too short"), "Expected 'too short' error, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_transcribe_audio_empty_key_no_proxy_errors() {
+        let result = transcribe_audio_bytes("", vec![0u8; 2000], "test.wav").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("API key not set"), "Expected API key error, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_transcribe_file_not_found() {
+        let result = transcribe_audio("fake-key", "/nonexistent/path/audio.wav").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found"), "Expected not found error, got: {}", err);
+    }
+
+    #[test]
+    fn test_max_whisper_file_size_reasonable() {
+        assert_eq!(MAX_WHISPER_FILE_SIZE, 15_000_000);
+        assert!(MAX_WHISPER_FILE_SIZE < 25_000_000, "Should be under Groq's 25MB limit");
+    }
+}

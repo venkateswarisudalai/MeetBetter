@@ -1,4 +1,6 @@
 fn main() {
+    load_build_env();
+
     #[cfg(target_os = "macos")]
     {
         // Weak-link ScreenCaptureKit so the binary still loads on macOS < 13
@@ -33,4 +35,30 @@ fn main() {
     }
 
     tauri_build::build()
+}
+
+// Forwards keys from ../.env.build into compile-time env vars so `env!()` calls
+// (calendar.rs, supabase.rs) resolve without the developer having to source the
+// file in their shell. Caller-provided env still wins.
+fn load_build_env() {
+    let path = std::path::Path::new("../.env.build");
+    println!("cargo:rerun-if-changed=../.env.build");
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return;
+    };
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        if std::env::var_os(key).is_some() {
+            continue;
+        }
+        println!("cargo:rustc-env={}={}", key, value);
+    }
 }

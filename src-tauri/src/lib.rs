@@ -1239,7 +1239,8 @@ fn parse_text_summary(text: &str) -> MeetingSummary {
 
         // Extract bullet points
         if line.starts_with('•') || line.starts_with('-') || line.starts_with('*') {
-            let content = line[1..].trim().to_string();
+            let first_char = line.chars().next().unwrap();
+            let content = line[first_char.len_utf8()..].trim().to_string();
             if !content.is_empty() && content.to_lowercase() != "none" && !content.to_lowercase().contains("none identified") {
                 match current_section {
                     Some("key_points") => key_points.push(content),
@@ -2287,5 +2288,251 @@ mod tests {
         let very_large_delay: u64 = 100000;
         let capped = std::cmp::min(very_large_delay, MAX_RETRY_DELAY_MS);
         assert_eq!(capped, 30000);
+    }
+
+    // Tests for format_milliseconds
+    #[test]
+    fn test_format_milliseconds_zero() {
+        assert_eq!(format_milliseconds(0), "00:00:00");
+    }
+
+    #[test]
+    fn test_format_milliseconds_one_second() {
+        assert_eq!(format_milliseconds(1000), "00:00:01");
+    }
+
+    #[test]
+    fn test_format_milliseconds_one_minute() {
+        assert_eq!(format_milliseconds(60_000), "00:01:00");
+    }
+
+    #[test]
+    fn test_format_milliseconds_one_hour() {
+        assert_eq!(format_milliseconds(3_600_000), "01:00:00");
+    }
+
+    #[test]
+    fn test_format_milliseconds_complex() {
+        // 1h 23m 45s = 5025000ms
+        assert_eq!(format_milliseconds(5_025_000), "01:23:45");
+    }
+
+    #[test]
+    fn test_format_milliseconds_sub_second_truncated() {
+        assert_eq!(format_milliseconds(500), "00:00:00");
+        assert_eq!(format_milliseconds(1999), "00:00:01");
+    }
+
+    // Tests for is_cross_channel_match
+    #[test]
+    fn test_cross_channel_exact_match() {
+        assert!(is_cross_channel_match(
+            "The project deadline is next Friday",
+            "the project deadline is next friday"
+        ));
+    }
+
+    #[test]
+    fn test_cross_channel_short_strings_exact_match() {
+        // Exact match always returns true, even for short strings
+        assert!(is_cross_channel_match("hello world", "hello world"));
+    }
+
+    #[test]
+    fn test_cross_channel_short_strings_no_overlap_match() {
+        // Short strings (< 4 words) that are NOT exact matches should not match
+        assert!(!is_cross_channel_match("hello world", "goodbye world"));
+        assert!(!is_cross_channel_match("yes okay", "no thanks"));
+    }
+
+    #[test]
+    fn test_cross_channel_different_strings_no_match() {
+        assert!(!is_cross_channel_match(
+            "The weather is nice today outside",
+            "Let us discuss the project timeline"
+        ));
+    }
+
+    #[test]
+    fn test_cross_channel_containment_match() {
+        assert!(is_cross_channel_match(
+            "I think we should discuss the budget",
+            "we should discuss the budget"
+        ));
+    }
+
+    #[test]
+    fn test_cross_channel_high_overlap_match() {
+        assert!(is_cross_channel_match(
+            "the meeting about budget planning tomorrow",
+            "the meeting about budget planning today"
+        ));
+    }
+
+    #[test]
+    fn test_cross_channel_low_overlap_no_match() {
+        assert!(!is_cross_channel_match(
+            "alpha beta gamma delta epsilon zeta",
+            "one two three four five six"
+        ));
+    }
+
+    // Tests for parse_text_summary
+    #[test]
+    fn test_parse_text_summary_with_all_sections() {
+        let text = r#"## KEY POINTS
+- Discussed the Q4 roadmap
+- Reviewed budget allocations
+
+## ACTION ITEMS
+- John to prepare the report by Friday
+- Sarah to schedule follow-up meeting
+
+## DECISIONS MADE
+- Approved the new hiring plan
+- Postponed office renovation
+
+## NOTES
+- Team morale is high
+- New intern starts Monday"#;
+
+        let summary = parse_text_summary(text);
+        assert_eq!(summary.key_points.len(), 2);
+        assert_eq!(summary.action_items.len(), 2);
+        assert_eq!(summary.decisions.len(), 2);
+        assert_eq!(summary.notes.len(), 2);
+        assert_eq!(summary.key_points[0], "Discussed the Q4 roadmap");
+        assert_eq!(summary.action_items[0], "John to prepare the report by Friday");
+        assert_eq!(summary.decisions[0], "Approved the new hiring plan");
+        assert_eq!(summary.notes[0], "Team morale is high");
+    }
+
+    #[test]
+    fn test_parse_text_summary_empty_input() {
+        let summary = parse_text_summary("");
+        assert!(summary.key_points.is_empty());
+        assert!(summary.action_items.is_empty());
+        assert!(summary.decisions.is_empty());
+        assert!(summary.notes.is_empty());
+    }
+
+    #[test]
+    fn test_parse_text_summary_none_identified_filtered() {
+        let text = r#"## KEY POINTS
+- Important discussion
+
+## ACTION ITEMS
+- None identified
+
+## DECISIONS
+- None identified
+
+## NOTES
+- None"#;
+
+        let summary = parse_text_summary(text);
+        assert_eq!(summary.key_points.len(), 1);
+        assert!(summary.action_items.is_empty(), "None identified should be filtered");
+        assert!(summary.decisions.is_empty(), "None identified should be filtered");
+        assert!(summary.notes.is_empty(), "None should be filtered");
+    }
+
+    #[test]
+    fn test_parse_text_summary_bullet_styles() {
+        let text = r#"## KEY POINTS
+• Point with bullet
+- Point with dash
+* Point with star"#;
+
+        let summary = parse_text_summary(text);
+        assert_eq!(summary.key_points.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_text_summary_stores_raw() {
+        let text = "## KEY POINTS\n- Something important";
+        let summary = parse_text_summary(text);
+        assert_eq!(summary.raw_summary, text);
+    }
+
+    // Tests for MeetingSummary serialization
+    #[test]
+    fn test_meeting_summary_default() {
+        let summary = MeetingSummary::default();
+        assert!(summary.key_points.is_empty());
+        assert!(summary.action_items.is_empty());
+        assert!(summary.decisions.is_empty());
+        assert!(summary.notes.is_empty());
+        assert!(summary.raw_summary.is_empty());
+    }
+
+    #[test]
+    fn test_meeting_summary_serialize_deserialize() {
+        let summary = MeetingSummary {
+            key_points: vec!["Point 1".to_string()],
+            action_items: vec!["Action 1".to_string()],
+            decisions: vec![],
+            notes: vec!["Note 1".to_string(), "Note 2".to_string()],
+            raw_summary: "raw".to_string(),
+        };
+
+        let json = serde_json::to_string(&summary).unwrap();
+        let deserialized: MeetingSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.key_points.len(), 1);
+        assert_eq!(deserialized.action_items.len(), 1);
+        assert!(deserialized.decisions.is_empty());
+        assert_eq!(deserialized.notes.len(), 2);
+    }
+
+    // Tests for TranscriptSegment
+    #[test]
+    fn test_transcript_segment_default() {
+        let segment = TranscriptSegment::default();
+        assert!(segment.timestamp.is_empty());
+        assert!(segment.speaker.is_empty());
+        assert!(segment.text.is_empty());
+    }
+
+    #[test]
+    fn test_transcript_segment_clone() {
+        let segment = TranscriptSegment {
+            timestamp: "10:30:00".to_string(),
+            speaker: "You".to_string(),
+            text: "Hello everyone".to_string(),
+            ..Default::default()
+        };
+        let cloned = segment.clone();
+        assert_eq!(cloned.timestamp, "10:30:00");
+        assert_eq!(cloned.speaker, "You");
+        assert_eq!(cloned.text, "Hello everyone");
+    }
+
+    // Tests for TranscriptionProvider
+    #[test]
+    fn test_transcription_provider_default_is_deepgram() {
+        let provider = TranscriptionProvider::default();
+        assert_eq!(provider, TranscriptionProvider::Deepgram);
+    }
+
+    #[test]
+    fn test_transcription_provider_serialize() {
+        let provider = TranscriptionProvider::Groq;
+        let json = serde_json::to_string(&provider).unwrap();
+        assert_eq!(json, "\"Groq\"");
+    }
+
+    // Tests for clean_transcript edge cases
+    #[test]
+    fn test_clean_transcript_only_fillers() {
+        let result = clean_transcript("um uh er ah");
+        // All filler words removed, result should be empty or minimal
+        assert!(result.trim().is_empty() || result.len() < 3);
+    }
+
+    #[test]
+    fn test_clean_transcript_preserves_words_containing_filler_substrings() {
+        // "like" is a filler, but "likelihood" contains "like" — should be preserved
+        let result = clean_transcript("the likelihood of success is high");
+        assert!(result.to_lowercase().contains("likelihood"));
     }
 }

@@ -165,3 +165,129 @@ impl AppSettings {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_settings_empty_api_keys() {
+        let settings = AppSettings::default();
+        assert!(settings.groq_api_key.is_empty());
+        assert!(settings.assemblyai_api_key.is_empty());
+        assert!(settings.deepgram_api_key.is_empty());
+    }
+
+    #[test]
+    fn test_default_settings_empty_model() {
+        let settings = AppSettings::default();
+        assert!(settings.selected_model.is_empty());
+        assert!(settings.transcription_provider.is_empty());
+    }
+
+    #[test]
+    fn test_default_settings_cloud_sync_disabled() {
+        let settings = AppSettings::default();
+        assert!(!settings.cloud_sync_enabled);
+    }
+
+    #[test]
+    fn test_default_proxy_url_populated() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.proxy_url, DEFAULT_PROXY_URL);
+        assert!(!settings.proxy_url.is_empty());
+    }
+
+    #[test]
+    fn test_settings_serialize_deserialize_roundtrip() {
+        let settings = AppSettings {
+            groq_api_key: "test-groq-key".to_string(),
+            assemblyai_api_key: "test-aai-key".to_string(),
+            deepgram_api_key: "test-dg-key".to_string(),
+            selected_model: "llama-3.3-70b-versatile".to_string(),
+            transcription_provider: "deepgram".to_string(),
+            meeting_context: "Weekly standup".to_string(),
+            cloud_sync_enabled: true,
+            proxy_url: "https://example.com".to_string(),
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let deserialized: AppSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.groq_api_key, "test-groq-key");
+        assert_eq!(deserialized.assemblyai_api_key, "test-aai-key");
+        assert_eq!(deserialized.deepgram_api_key, "test-dg-key");
+        assert_eq!(deserialized.selected_model, "llama-3.3-70b-versatile");
+        assert_eq!(deserialized.transcription_provider, "deepgram");
+        assert_eq!(deserialized.meeting_context, "Weekly standup");
+        assert!(deserialized.cloud_sync_enabled);
+        assert_eq!(deserialized.proxy_url, "https://example.com");
+    }
+
+    #[test]
+    fn test_settings_deserialize_missing_fields_uses_defaults() {
+        // Simulate an older settings file that doesn't have all fields
+        let json = r#"{"groq_api_key": "my-key"}"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+
+        assert_eq!(settings.groq_api_key, "my-key");
+        assert!(settings.assemblyai_api_key.is_empty());
+        assert!(settings.deepgram_api_key.is_empty());
+        assert!(!settings.cloud_sync_enabled);
+        assert_eq!(settings.proxy_url, DEFAULT_PROXY_URL);
+    }
+
+    #[test]
+    fn test_settings_deserialize_empty_json() {
+        let json = "{}";
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+
+        assert!(settings.groq_api_key.is_empty());
+        assert_eq!(settings.proxy_url, DEFAULT_PROXY_URL);
+    }
+
+    #[test]
+    fn test_env_override_groq_key() {
+        let mut settings = AppSettings::default();
+        assert!(settings.groq_api_key.is_empty());
+
+        // Simulate env override
+        std::env::set_var(ENV_GROQ_API_KEY, "env-groq-key");
+        settings.apply_env_overrides();
+        assert_eq!(settings.groq_api_key, "env-groq-key");
+
+        // Clean up
+        std::env::remove_var(ENV_GROQ_API_KEY);
+    }
+
+    #[test]
+    fn test_env_override_empty_value_no_change() {
+        let mut settings = AppSettings {
+            groq_api_key: "file-key".to_string(),
+            ..AppSettings::default()
+        };
+
+        std::env::set_var(ENV_GROQ_API_KEY, "");
+        settings.apply_env_overrides();
+        // Empty env var should NOT override
+        assert_eq!(settings.groq_api_key, "file-key");
+
+        std::env::remove_var(ENV_GROQ_API_KEY);
+    }
+
+    #[test]
+    fn test_env_constants_defined() {
+        assert_eq!(ENV_GROQ_API_KEY, "VANTAGE_GROQ_API_KEY");
+        assert_eq!(ENV_DEEPGRAM_API_KEY, "VANTAGE_DEEPGRAM_API_KEY");
+        assert_eq!(ENV_ASSEMBLYAI_API_KEY, "VANTAGE_ASSEMBLYAI_API_KEY");
+        assert_eq!(ENV_PROXY_URL, "VANTAGE_PROXY_URL");
+    }
+
+    #[test]
+    fn test_settings_path_ends_with_expected() {
+        if let Some(path) = AppSettings::get_settings_path() {
+            assert!(path.ends_with("vantage/settings.json"));
+        }
+        // If config_dir() returns None (unlikely on macOS), test just passes
+    }
+}

@@ -47,6 +47,16 @@ Thumbs.db
 # Local Netlify folder
 .netlify
 
+# Playwright artifacts
+test-results/
+test-results */
+**/e2e-report/
+**/playwright-report/
+*.tsbuildinfo
+
+# Local Claude Code state
+.claude/
+
 # Local screencapturekit patch (vendored dependency)
 src-tauri/screencapturekit-patch/
 
