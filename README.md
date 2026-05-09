@@ -10,7 +10,9 @@ Live site: https://vantage-meeting-app.netlify.app · Latest release: **v0.4.0**
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)
 ![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB)
 
-> **Just want to try it?** Run `curl -fsSL https://vantage-meeting-app.netlify.app/install.sh | bash` or grab the [v0.4.0 DMG](https://github.com/venkateswarisudalai/Vantage/releases/download/v0.4.0/Vantage-0.4.0-universal.dmg). Building from source? Read on.
+> **Just want to try it?** Run `curl -fsSL https://vantage-meeting-app.netlify.app/install.sh | bash` or grab the [v0.4.0 DMG](https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.4.0/Vantage-0.4.0-universal.dmg). Step-by-step install + permissions guide: [**TESTER_SETUP.md**](TESTER_SETUP.md).
+>
+> **Building from source?** Keep reading, or jump to [TESTING.md](TESTING.md) for the developer test plan.
 
 ## Overview
 
@@ -58,7 +60,7 @@ Vantage is a Tauri 2 desktop app (Rust backend, React 19 frontend) that does rea
 ### Three things you can run
 
 ```bash
-git clone https://github.com/venkateswarisudalai/Vantage.git
+git clone https://github.com/venkateswarisudalai/MeetBetter.git
 cd Vantage
 npm install
 ```
