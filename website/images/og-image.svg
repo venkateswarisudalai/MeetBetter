@@ -1,0 +1,41 @@
+<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a1a"/>
+      <stop offset="100%" style="stop-color:#2d2d2d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#c8956c"/>
+      <stop offset="100%" style="stop-color:#d4a574"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <!-- Subtle grid pattern -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <!-- Logo mark -->
+  <rect x="80" y="200" width="56" height="56" rx="14" fill="url(#accent)"/>
+  <text x="95" y="240" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="700" fill="#fff">V</text>
+  <!-- App name -->
+  <text x="152" y="240" font-family="system-ui, -apple-system, sans-serif" font-size="42" font-weight="700" fill="#ffffff" letter-spacing="-1">Vantage</text>
+  <!-- Headline -->
+  <text x="80" y="320" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="700" fill="#ffffff" letter-spacing="-1.5">Your meetings, actually captured</text>
+  <!-- Subheadline -->
+  <text x="80" y="375" font-family="system-ui, -apple-system, sans-serif" font-size="22" fill="rgba(255,255,255,0.6)">Real-time transcription and AI summaries. Free &amp; open source.</text>
+  <!-- Features pills -->
+  <rect x="80" y="420" width="180" height="38" rx="19" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="115" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="rgba(255,255,255,0.7)">Live Transcription</text>
+  <rect x="275" y="420" width="150" height="38" rx="19" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="300" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="rgba(255,255,255,0.7)">AI Summaries</text>
+  <rect x="440" y="420" width="145" height="38" rx="19" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="465" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="rgba(255,255,255,0.7)">Privacy-First</text>
+  <rect x="600" y="420" width="120" height="38" rx="19" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="625" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="rgba(255,255,255,0.7)">For macOS</text>
+  <!-- Accent line -->
+  <rect x="80" y="270" width="60" height="3" rx="1.5" fill="url(#accent)"/>
+  <!-- Decorative elements -->
+  <circle cx="1050" cy="150" r="120" fill="rgba(200,149,108,0.06)"/>
+  <circle cx="1100" cy="450" r="80" fill="rgba(200,149,108,0.04)"/>
+</svg>

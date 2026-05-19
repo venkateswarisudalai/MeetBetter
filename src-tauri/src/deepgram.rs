@@ -771,4 +771,126 @@ mod tests {
         assert_eq!(msg.text, "Hello...");
         assert_eq!(msg.source, AudioSource::SystemAudio);
     }
+
+    #[test]
+    fn test_transcript_message_no_speaker() {
+        let msg = TranscriptMessage {
+            text: "Unknown speaker".to_string(),
+            is_final: true,
+            speaker: None,
+            source: AudioSource::Microphone,
+        };
+        assert!(msg.speaker.is_none());
+        assert!(msg.is_final);
+    }
+
+    #[test]
+    fn test_deepgram_response_deserialization_full() {
+        let json = r#"{
+            "type": "Results",
+            "channel": {
+                "alternatives": [{
+                    "transcript": "Hello world",
+                    "confidence": 0.95,
+                    "words": [
+                        {"word": "Hello", "speaker": 0},
+                        {"word": "world", "speaker": 0}
+                    ]
+                }]
+            },
+            "channel_index": [0, 2],
+            "is_final": true,
+            "speech_final": true
+        }"#;
+        let resp: DeepgramResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.msg_type, Some("Results".to_string()));
+        assert!(resp.is_final.unwrap());
+        assert!(resp.speech_final.unwrap());
+        let channel = resp.channel.unwrap();
+        assert_eq!(channel.alternatives[0].transcript, "Hello world");
+        assert!((channel.alternatives[0].confidence - 0.95).abs() < 0.001);
+        assert_eq!(channel.alternatives[0].words.len(), 2);
+        assert_eq!(channel.alternatives[0].words[0].word, "Hello");
+        assert_eq!(channel.alternatives[0].words[0].speaker, Some(0));
+    }
+
+    #[test]
+    fn test_deepgram_response_deserialization_empty_transcript() {
+        let json = r#"{
+            "type": "Results",
+            "channel": {
+                "alternatives": [{
+                    "transcript": "",
+                    "confidence": 0.0,
+                    "words": []
+                }]
+            },
+            "is_final": true
+        }"#;
+        let resp: DeepgramResponse = serde_json::from_str(json).unwrap();
+        let channel = resp.channel.unwrap();
+        assert!(channel.alternatives[0].transcript.is_empty());
+        assert!(channel.alternatives[0].words.is_empty());
+    }
+
+    #[test]
+    fn test_deepgram_response_deserialization_no_channel() {
+        let json = r#"{"type": "Metadata"}"#;
+        let resp: DeepgramResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.channel.is_none());
+        assert!(resp.is_final.is_none());
+    }
+
+    #[test]
+    fn test_deepgram_response_multichannel_index() {
+        let json = r#"{
+            "type": "Results",
+            "channel_index": [1, 2],
+            "channel": {
+                "alternatives": [{
+                    "transcript": "Participant speaking",
+                    "confidence": 0.9,
+                    "words": []
+                }]
+            },
+            "is_final": true
+        }"#;
+        let resp: DeepgramResponse = serde_json::from_str(json).unwrap();
+        let idx = resp.channel_index.unwrap();
+        assert_eq!(idx[0], 1); // channel index
+        assert_eq!(idx[1], 2); // total channels
+    }
+
+    #[test]
+    fn test_deepgram_transcriber_initial_state() {
+        let (tx, _rx) = mpsc::channel(10);
+        let transcriber = DeepgramTranscriber::new(tx);
+        assert!(!transcriber.is_running());
+    }
+
+    #[test]
+    fn test_deepgram_transcriber_stop() {
+        let (tx, _rx) = mpsc::channel(10);
+        let transcriber = DeepgramTranscriber::new(tx);
+        transcriber.is_running.store(true, Ordering::SeqCst);
+        assert!(transcriber.is_running());
+        transcriber.stop();
+        assert!(!transcriber.is_running());
+    }
+
+    #[test]
+    fn test_word_deserialization_with_speaker() {
+        let json = r#"{"word": "meeting", "speaker": 2}"#;
+        let word: Word = serde_json::from_str(json).unwrap();
+        assert_eq!(word.word, "meeting");
+        assert_eq!(word.speaker, Some(2));
+    }
+
+    #[test]
+    fn test_word_deserialization_without_speaker() {
+        let json = r#"{"word": "hello"}"#;
+        let word: Word = serde_json::from_str(json).unwrap();
+        assert_eq!(word.word, "hello");
+        assert!(word.speaker.is_none());
+    }
 }

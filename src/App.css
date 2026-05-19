@@ -1009,7 +1009,6 @@ body {
 .transcript-list.chat-style .transcript-item.participant .speaker-label {
   color: var(--accent);
 }
-}
 
 .transcript-list.chat-style .interim-badge {
   font-size: 11px;

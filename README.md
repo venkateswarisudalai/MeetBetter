@@ -1,18 +1,22 @@
-# MeetBetter
+# Vantage
 
-A powerful, privacy-focused desktop application for real-time meeting transcription with AI-powered summaries, dual audio capture, and calendar integration.
+Privacy-first desktop app for real-time meeting transcription with AI-powered summaries, dual audio capture, and calendar auto-start.
 
-![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)
+Live site: https://vantage-meeting-app.netlify.app · Latest release: **v0.4.0** (macOS universal)
+
+![Platform](https://img.shields.io/badge/Platform-macOS%2012.3%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue)
 ![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB)
 
-> **Want to test this app?** See [TESTING.md](TESTING.md) for a quick 5-minute setup guide!
+> **Just want to try it?** Run `curl -fsSL https://vantage-meeting-app.netlify.app/install.sh | bash` or grab the [v0.4.0 DMG](https://github.com/venkateswarisudalai/MeetBetter/releases/download/v0.4.0/Vantage-0.4.0-universal.dmg). Step-by-step install + permissions guide: [**TESTER_SETUP.md**](TESTER_SETUP.md).
+>
+> **Building from source?** Keep reading, or jump to [TESTING.md](TESTING.md) for the developer test plan.
 
 ## Overview
 
-MeetBetter is a production-ready desktop application built with **Tauri 2.0**, **Rust**, and **React** that transforms how meetings are transcribed and managed. It features real-time speech-to-text with sub-2-second latency, intelligent speaker separation through dual-channel audio processing, and calendar-driven automation.
+Vantage is a Tauri 2 desktop app (Rust backend, React 19 frontend) that does real-time speech-to-text with sub-2-second latency, separates "You" vs "Participant" via dual-channel audio routing, and can auto-start transcription when a calendar meeting begins.
 
 **Key Innovation:** Dual audio capture technology that differentiates between your microphone and system audio in real-time, solving the common problem of "who said what" in virtual meetings.
 
@@ -31,7 +35,7 @@ MeetBetter is a production-ready desktop application built with **Tauri 2.0**, *
 - **Meeting Management** - Save, search, and review past meetings with full transcripts
 - **Privacy First** - Your audio stays on your device, only transcription text is sent to APIs
 - **Beautiful UI** - Modern, responsive interface with dark mode support
-- **Cross-Platform** - Works on macOS, Windows, and Linux
+- **macOS Universal** - Single DMG works on Intel and Apple Silicon (macOS 12.3+)
 
 ## Screenshots
 
@@ -40,102 +44,67 @@ MeetBetter is a production-ready desktop application built with **Tauri 2.0**, *
   <img src="docs/screenshot-dark.png" alt="Dark Mode" width="45%">
 </p>
 
-## Quick Start
+## Run it locally
+
+> Vantage is currently macOS-only (12.3+). The Rust backend uses ScreenCaptureKit + cpal for audio, so Windows/Linux dev hasn't been wired up yet.
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- [Rust](https://rustup.rs/) (latest stable)
-- API Keys (see [API Setup](#api-setup))
-- **[Optional but Recommended]** [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) for dual audio capture (macOS only)
+| Tool | Version | Install |
+|---|---|---|
+| **Xcode Command Line Tools** | any | `xcode-select --install` |
+| **Node.js** | 18+ (tested on 22) | `brew install node` or [nodejs.org](https://nodejs.org/) |
+| **Rust** | stable | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| **BlackHole 2ch** *(optional)* | 2.x | `brew install blackhole-2ch` — only needed for dual-channel "You" vs "Participant" audio |
 
-### Installation
+### Three things you can run
 
 ```bash
-# Clone the repository
 git clone https://github.com/venkateswarisudalai/MeetBetter.git
-cd MeetBetter
-
-# Install dependencies
+cd Vantage
 npm install
-
-# Run in development mode
-npm run tauri dev
-
-# Build for production
-npm run tauri build
 ```
 
-## Complete Setup Guide
-
-### Step 1: Install System Dependencies
-
-#### macOS:
+**1. Full desktop app (Tauri + Rust)** — what you ship to users.
 ```bash
-# Install Homebrew (if not already installed)
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install Node.js
-brew install node
-
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# Optional: Install BlackHole for dual audio capture
-brew install blackhole-2ch
+npm run tauri dev      # ~5 min first build, ~10s thereafter
+npm run tauri build    # produces a universal DMG in src-tauri/target/
 ```
 
-#### Windows:
-```powershell
-# Install Node.js from https://nodejs.org/
-
-# Install Rust
-# Download and run: https://win.rustup.rs/
-
-# Optional: Install VB-Cable for dual audio capture
-# Download from: https://vb-audio.com/Cable/
-```
-
-#### Linux:
+**2. Frontend only (Vite, no Rust)** — fast iteration on UI when the Tauri IPC layer is mocked.
 ```bash
-# Install Node.js (Ubuntu/Debian)
-sudo apt update
-sudo apt install nodejs npm
-
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# Install build dependencies
-sudo apt install libwebkit2gtk-4.0-dev \
-    build-essential \
-    curl \
-    wget \
-    file \
-    libssl-dev \
-    libgtk-3-dev \
-    libayatana-appindicator3-dev \
-    librsvg2-dev
+npm run dev            # serves http://localhost:1420
 ```
 
-### Step 2: Clone and Build
+**3. End-to-end tests (Playwright against the mocked frontend).**
+```bash
+npm run test:e2e           # headless
+npm run test:e2e:headed    # see the browser
+npm run test:e2e:report    # open last HTML report
+```
+
+### Compile-time secrets
+
+Google OAuth and Supabase keys are baked into the Rust binary via `env!()`. The defaults live in `.env.build` at the repo root and are auto-loaded by `src-tauri/build.rs` — no shell sourcing needed. To override, set the env vars in your shell before building:
 
 ```bash
-# Clone the repository
-git clone https://github.com/venkateswarisudalai/MeetBetter.git
-cd MeetBetter
-
-# Install JavaScript dependencies
-npm install
-
-# Build and run in development mode
-npm run tauri dev
+GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… npm run tauri dev
 ```
 
-The app should launch automatically! 🚀
+### Per-user API keys
 
-### Step 3: Configure API Keys
+Deepgram and Groq keys are entered through the in-app Settings UI on first launch. Optionally, drop them into a local `.env` for development:
+
+```bash
+cp .env.example .env
+# then fill in VANTAGE_DEEPGRAM_API_KEY and VANTAGE_GROQ_API_KEY
+```
+
+The app should launch automatically on `npm run tauri dev`. If `cargo` is missing, `source $HOME/.cargo/env` (or restart your terminal).
+
+## First-run setup
+
+### Configure API Keys
 
 You only need **2 free API keys** to get started. Calendar integration and cloud sync are built in — no extra configuration needed.
 
@@ -144,12 +113,12 @@ You only need **2 free API keys** to get started. Calendar integration and cloud
    - **Groq**: Sign up at https://console.groq.com — free tier
 
 2. **Add Keys to App**:
-   - Open MeetBetter app — the welcome screen guides you through both steps
+   - Open Vantage app — the welcome screen guides you through both steps
    - Paste your Deepgram API key
    - Paste your Groq API key
    - Click **Save**
 
-### Step 4: Set Up Dual Audio (Optional)
+### Set Up Dual Audio (Optional)
 
 **Why do this?** Separates "You" (microphone) from "Participant" (system audio/remote speakers) in transcriptions.
 
@@ -199,17 +168,17 @@ brew install blackhole-2ch
    # Then speak into your mic
    ```
 
-6. **Verify in MeetBetter**:
+6. **Verify in Vantage**:
    - Start Live Transcription
    - Play a video → should show **"Participant:"**
    - Speak into mic → should show **"You:"**
 
-### Step 5: Set Up Calendar Auto-Start (Optional)
+### Set Up Calendar Auto-Start (Optional)
 
 **Why do this?** Automatically start transcription when your meetings begin. Calendar integration is built in — just click connect.
 
 1. **Connect Google Calendar**:
-   - Open MeetBetter → **Settings**
+   - Open Vantage → **Settings**
    - Click **"Connect Calendar"** — your browser opens for Google sign-in
    - Grant calendar permissions and you'll be redirected back
 
@@ -221,10 +190,10 @@ brew install blackhole-2ch
 3. **Test It**:
    - Create a test meeting in Google Calendar (5 minutes from now)
    - Open Zoom/Teams/Meet app
-   - MeetBetter should show "Meeting starting in X minutes"
+   - Vantage should show "Meeting starting in X minutes"
    - Transcription should auto-start when buffer time is reached
 
-### Step 6: Grant Permissions (macOS)
+### Grant macOS Permissions
 
 When you first run the app, macOS will ask for permissions:
 
@@ -234,7 +203,7 @@ When you first run the app, macOS will ask for permissions:
 
 2. **Accessibility** (if using calendar auto-start):
    - System Settings → Privacy & Security → Accessibility
-   - Add MeetBetter and toggle ON
+   - Add Vantage and toggle ON
 
 ### Troubleshooting Setup
 
@@ -365,24 +334,33 @@ You only need **2 free API keys** to get started. Calendar and cloud sync are bu
 ## Project Structure
 
 ```
-meetbetter/
-├── src/                       # React frontend
-│   ├── App.tsx               # Main React component
-│   └── App.css               # Styles
+vantage/
+├── src/                      # React frontend (App.tsx, App.css)
 ├── src-tauri/                # Rust backend
 │   ├── src/
-│   │   ├── lib.rs            # Tauri commands & state
+│   │   ├── lib.rs            # Tauri commands & shared state
 │   │   ├── deepgram.rs       # Real-time multichannel transcription
+│   │   ├── groq.rs           # AI summaries & reply suggestions
 │   │   ├── system_audio.rs   # BlackHole audio device detection
-│   │   ├── meeting_monitor.rs # Calendar polling & meeting detection
-│   │   ├── calendar.rs       # Google Calendar OAuth integration
-│   │   ├── assemblyai.rs     # Batch transcription
+│   │   ├── meeting_monitor.rs# Calendar polling & meeting detection
+│   │   ├── calendar.rs       # Google Calendar OAuth (env-baked client ID)
+│   │   ├── supabase.rs       # Cloud sync (env-baked URL/key)
 │   │   ├── database.rs       # SQLite meeting storage
-│   │   └── audio.rs          # Audio recording
-│   └── Cargo.toml            # Rust dependencies
-├── switch-audio.sh           # Helper script for audio routing
-├── package.json              # Node dependencies
-└── README.md
+│   │   ├── settings.rs       # Per-user keys & preferences
+│   │   └── audio.rs          # Microphone capture
+│   ├── build.rs              # macOS link flags + auto-loads ../.env.build
+│   └── Cargo.toml
+├── e2e/                      # Playwright tests against the mocked frontend
+├── playwright.config.ts
+├── website/                  # Marketing site (deployed to Netlify)
+├── web-app/                  # Standalone web build (separate Vite project)
+├── browser-extension/        # Companion browser extension
+├── proxy/                    # Optional Cloudflare Worker proxy for demo mode
+├── scripts/sign-and-package.sh
+├── switch-audio.sh           # BlackHole audio routing helper
+├── .env.build                # Compile-time secrets (Google OAuth, Supabase)
+├── .env.example              # Template for runtime API keys
+└── package.json
 ```
 
 ## Contributing
@@ -398,17 +376,12 @@ Contributions are welcome! Here's how you can help:
 
 ### Development Setup
 
+See [Run it locally](#run-it-locally) above for prerequisites and the three dev workflows (Tauri, Vite-only, Playwright). Before opening a PR, run:
+
 ```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Clone and setup
-git clone https://github.com/YOUR_USERNAME/meeting-assistant.git
-cd meeting-assistant
-npm install
-
-# Run development server
-npm run tauri dev
+npm run build       # tsc + vite build (must be clean)
+npm run test:e2e    # Playwright suite
+(cd src-tauri && cargo check)
 ```
 
 ### Pull Request Process
@@ -527,8 +500,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 - Star this repo if you find it useful!
-- [Report bugs](https://github.com/YOUR_USERNAME/meeting-assistant/issues)
-- [Request features](https://github.com/YOUR_USERNAME/meeting-assistant/issues)
+- [Report bugs](https://github.com/venkateswarisudalai/MeetBetter/issues)
+- [Request features](https://github.com/venkateswarisudalai/MeetBetter/issues)
 
 ---
 

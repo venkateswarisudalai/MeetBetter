@@ -1,186 +1,121 @@
-# Testing MeetBetter
+# Testing Vantage (developer guide)
 
-Thank you for testing MeetBetter! This guide will help you get started quickly.
+This file is for **developers building from source**. If you just downloaded the DMG from the website and want to use Vantage, see [TESTER_SETUP.md](TESTER_SETUP.md) instead.
 
-## Quick Test (5 minutes)
+---
 
-### 1. Prerequisites
-- macOS (Apple Silicon or Intel)
-- Free API keys (takes 2 minutes to get)
+## 1. Prerequisites
 
-### 2. Get API Keys
+| Tool | Version | Install |
+|---|---|---|
+| Xcode Command Line Tools | any | `xcode-select --install` |
+| Node.js | 18+ (tested on 22) | `brew install node` |
+| Rust | stable | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| BlackHole 2ch *(optional)* | 2.x | `brew install blackhole-2ch` — only for dual-channel audio testing |
 
-#### Deepgram (Required - for transcription)
-1. Go to https://console.deepgram.com/signup
-2. Sign up with email
-3. Navigate to **API Keys** → **Create a New API Key**
-4. Copy the key
+You'll also need free API keys for Deepgram and Groq (see [TESTER_SETUP.md §3](TESTER_SETUP.md#3-get-two-free-api-keys-2-min)).
 
-#### Groq (Required - for AI summaries)
-1. Go to https://console.groq.com/keys
-2. Sign up with Google/GitHub
-3. Click **Create API Key**
-4. Copy the key
-
-### 3. Install & Run
+## 2. Clone and install
 
 ```bash
-# Clone the repository
 git clone https://github.com/venkateswarisudalai/MeetBetter.git
 cd MeetBetter
-
-# Install dependencies
 npm install
-
-# Run the app
-npm run tauri dev
 ```
 
-The app should launch automatically!
+Compile-time secrets (Google OAuth client, Supabase URL/key) live in `.env.build` and are auto-loaded by `src-tauri/build.rs` — no shell sourcing needed. To override, set the env vars in your shell before building.
 
-### 4. Configure API Keys
+## 3. Three ways to run
 
-1. Click the **⚙️ Settings** icon (top right)
-2. Paste your **Deepgram API key**
-3. Paste your **Groq API key**
-4. Click **Save**
+### Full desktop app (Tauri + Rust)
+```bash
+npm run tauri dev      # ~5 min first build, ~10s incremental
+```
+Use this for testing anything that touches Rust: audio capture, calendar OAuth, persistence, system audio.
 
-### 5. Test Basic Transcription
+### Frontend only (Vite, no Rust)
+```bash
+npm run dev            # serves http://localhost:1420
+```
+Tauri IPC must be mocked (see `e2e/helpers.ts → installTauriMocks`). Fastest loop for pure UI work.
 
-1. Click **"Start Live Transcription"**
-2. Speak into your microphone
-3. Watch real-time transcription appear
-4. Click **"Stop Transcription"**
-5. Click **"Generate"** to get AI summary
+### Playwright e2e tests
+```bash
+npm run test:e2e           # headless
+npm run test:e2e:headed    # see the browser
+npm run test:e2e:report    # open last HTML report (e2e-report/)
+```
+The suite mocks Tauri events to verify chat-bubble layout, speaker labels, interim → final replacement, and full-meeting rendering. Playwright config reuses an existing dev server on port 1420 outside CI; if another project is on that port, kill it first.
 
-**Expected Result:** You should see your words transcribed in real-time with very low latency (1-2 seconds).
+## 4. Pre-PR checks
 
----
-
-## Advanced Test: Dual Audio Capture (Optional - 10 minutes)
-
-Test the unique feature that separates "You" (microphone) from "Participant" (system audio).
-
-### Setup
+Before opening a PR, all of these must pass:
 
 ```bash
-# Install BlackHole virtual audio device
-brew install blackhole-2ch
-
-# Create Multi-Output Device (so you can hear audio)
-# 1. Open Audio MIDI Setup app
-# 2. Click "+" → "Create Multi-Output Device"
-# 3. Check: BlackHole 2ch + MacBook Pro Speakers
-# 4. System Settings → Sound → Output → Select "Multi-Output Device"
+npm run build               # tsc + vite, must be warning-free
+(cd src-tauri && cargo check)
+npm run test:e2e
 ```
 
-### Test
+For a real release, also smoke-test `npm run tauri dev` end-to-end, then build the DMG:
 
-1. Start Live Transcription
-2. Play a YouTube video
-3. Also speak into your microphone
+```bash
+npm run tauri build
+./scripts/sign-and-package.sh
+```
 
-**Expected Result:**
-- Video audio shows as **"Participant:"**
-- Your voice shows as **"You:"**
+## 5. Manual verification checklist
 
----
+Run through the same scenarios real users hit. A clean transcript here is the strongest signal that nothing regressed.
 
-## Test Calendar Auto-Start (Optional - 5 minutes)
+### Core flow
+- [ ] Welcome screen accepts Deepgram + Groq keys
+- [ ] Live transcription starts, latency < 2s
+- [ ] Stop → transcript renders fully (final segments only, no leftover interims)
+- [ ] Generate → summary returns key points / action items / decisions
+- [ ] Save Meeting → it persists across app relaunch
+- [ ] Re-open a saved meeting → transcript and summary render
 
-1. Click **Settings** → **Meeting Auto-Start**
-2. Enable **"Auto-start on meeting time"**
-3. Click **"Connect Calendar"** → Sign in with Google
-4. Create a test meeting in Google Calendar (5 minutes from now)
-5. Open Zoom/Teams/Meet
-
-**Expected Result:** App shows "Meeting starting in X minutes" and auto-starts transcription when the time comes.
-
----
-
-## What to Test & Report
-
-### ✅ Core Features
-- [ ] Real-time transcription works
-- [ ] Transcription latency is acceptable (1-2 seconds)
-- [ ] AI summary generation works
-- [ ] Can save and view past meetings
-- [ ] UI is intuitive and responsive
-
-### ✅ Dual Audio (if tested)
-- [ ] Can differentiate "You" vs "Participant"
+### Dual audio (with BlackHole + Multi-Output Device)
+- [ ] Mic input → labeled "You" (right side bubble)
+- [ ] System audio (e.g. YouTube playback) → labeled "Participant" (left side bubble)
 - [ ] No duplicate transcriptions
-- [ ] Audio quality is good
+- [ ] Stopping and restarting doesn't change the labeling
 
-### ✅ Calendar Integration (if tested)
-- [ ] Google Calendar connection works
-- [ ] Auto-start triggers correctly
-- [ ] Meeting detection works
+### Calendar auto-start
+- [ ] OAuth completes without redirect loop
+- [ ] Upcoming events list populates
+- [ ] Test event 5 min out + Zoom/Meet open → auto-start fires within the buffer window
 
-### 🐛 Issues to Report
-- Any crashes or errors
-- Features that don't work as expected
-- UI/UX issues
-- Performance problems
-- Installation difficulties
+### Permissions
+- [ ] Fresh install asks for Microphone → grant → works
+- [ ] Asks for Screen Recording → grant → system audio works
+- [ ] Revoking either permission shows a clear error in-app, not a silent failure
 
----
+### Edge cases
+- [ ] No internet → clear error, no crash
+- [ ] Bad API key → clear error in Settings
+- [ ] Deepgram quota exhausted → clear error
+- [ ] Very long meeting (30+ min) → no memory blow-up, summary still works
+- [ ] Privacy: confirm via Network tab that no audio bytes leave the device — only transcript text
 
-## Reporting Feedback
+## 6. What to write in a bug report
 
-Please report issues or feedback via:
-- GitHub Issues: https://github.com/venkateswarisudalai/MeetBetter/issues
-- Email: [your email]
-- Or provide feedback directly
+- macOS version (`sw_vers`)
+- Vantage version (Settings → About) and `git rev-parse --short HEAD` if running from source
+- What you did, what you expected, what happened
+- Any error text from the app
+- Relevant lines from the dev console (Right-click in Tauri window → Inspect Element → Console) if frontend
+- For Rust panics: terminal output from `npm run tauri dev`
 
-**What to include:**
-- What you were trying to do
-- What happened (vs what you expected)
-- Any error messages
-- macOS version
-- Screenshots (if applicable)
+## 7. Known gotchas
 
----
-
-## FAQ
-
-**Q: Do I need to install BlackHole?**
-A: No! BlackHole is only needed for the dual audio capture feature (separating "You" vs "Participant"). The app works perfectly without it.
-
-**Q: Can I use this for real meetings?**
-A: Yes! But be aware:
-- You're responsible for API costs (both have generous free tiers)
-- Always inform meeting participants you're recording/transcribing
-- Check your local laws about recording consent
-
-**Q: Is my audio data stored somewhere?**
-A: No. Audio is processed in real-time and only the transcription text is sent to APIs. Nothing is stored on external servers except in your local database.
-
-**Q: What happens if I run out of API credits?**
-A: The app will show an error. You can:
-- Upgrade your Deepgram/Groq plan
-- Get a new free tier account
-- The app won't charge you anything - you only pay APIs directly
+- **Port 1420 already in use** — another Vite project is running. `lsof -i :1420` to find it; kill it before running tests.
+- **`xcrun: error` during `cargo build`** — `xcode-select --install`.
+- **`source $HOME/.cargo/env` not run** — `cargo` not on PATH; restart terminal or source it.
+- **`.env.build` missing** — Rust build fails with `env! GOOGLE_CLIENT_ID not defined at compile time`. The file is committed; if you cleaned the working tree too aggressively, restore it from git.
+- **Stale Cargo target after a Rust toolchain update** — `(cd src-tauri && cargo clean)` and rebuild.
 
 ---
 
-## Performance Expectations
-
-**System Requirements:**
-- macOS 10.15 or later
-- 4GB RAM minimum (8GB recommended)
-- Internet connection (for transcription APIs)
-
-**Expected Performance:**
-- Transcription latency: 1-2 seconds
-- CPU usage: Low (5-10% on M1)
-- Memory usage: ~200-300 MB
-- Network usage: ~50-100 KB/s during transcription
-
----
-
-## Thank You!
-
-Your feedback is invaluable for improving MeetBetter. Thank you for taking the time to test!
-
-For questions or issues, reach out via GitHub Issues or email.
+For end-user / tester install instructions, see [TESTER_SETUP.md](TESTER_SETUP.md). For the high-level architecture, see [README.md](README.md).
