@@ -109,7 +109,7 @@ The app should launch automatically on `npm run tauri dev`. If `cargo` is missin
 You only need **2 free API keys** to get started. Calendar integration and cloud sync are built in — no extra configuration needed.
 
 1. **Get API Keys** (both have free tiers):
-   - **Deepgram**: Sign up at https://console.deepgram.com — includes $200 free credit
+   - **Deepgram**: Sign up at https://console.deepgram.com — free credit
    - **Groq**: Sign up at https://console.groq.com — free tier
 
 2. **Add Keys to App**:
