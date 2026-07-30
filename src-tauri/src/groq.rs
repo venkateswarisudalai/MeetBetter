@@ -48,6 +48,27 @@ pub async fn generate(api_key: &str, model: &str, prompt: &str) -> Result<String
 
 /// Generate a response, optionally routing through a proxy.
 pub async fn generate_with_proxy(api_key: &str, model: &str, prompt: &str, proxy_url: Option<&str>) -> Result<String> {
+    generate_with_system(
+        api_key,
+        model,
+        "You are a helpful meeting assistant. Be concise and professional.",
+        prompt,
+        proxy_url,
+    )
+    .await
+}
+
+/// Generate a response with a caller-supplied system prompt.
+///
+/// The default assistant system prompt pushes every answer short, which fights
+/// tasks that need full spoken sentences (e.g. live reply suggestions).
+pub async fn generate_with_system(
+    api_key: &str,
+    model: &str,
+    system_prompt: &str,
+    prompt: &str,
+    proxy_url: Option<&str>,
+) -> Result<String> {
     let use_proxy = proxy_url.is_some() && !proxy_url.unwrap().is_empty();
 
     if api_key.is_empty() && !use_proxy {
@@ -59,7 +80,7 @@ pub async fn generate_with_proxy(api_key: &str, model: &str, prompt: &str, proxy
     let messages = vec![
         ChatMessage {
             role: "system".to_string(),
-            content: "You are a helpful meeting assistant. Be concise and professional.".to_string(),
+            content: system_prompt.to_string(),
         },
         ChatMessage {
             role: "user".to_string(),

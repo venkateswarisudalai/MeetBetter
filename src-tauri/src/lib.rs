@@ -1425,16 +1425,27 @@ async fn generate_auto_replies(
     };
 
     let prompt = format!(
-        r#"You are the inner voice of a master communicator (Chris Voss, top negotiators). Generate tactical responses for this conversation.
+        r#"You are an in-ear assistant for the user during a live conversation. Your job is to hand them words they can say out loud right now.
 
-{}CONVERSATION:
+{}CONVERSATION (oldest first, most recent last):
 {}
 
-JUST SAID: "{}"
+MOST RECENT LINE: "{}"
 
-Generate 6 tactical suggestions grouped by type. Mark the BEST one with ★.
+FIRST, decide: is the most recent line a question or a request aimed at the user?
+- If YES: give 4 ANSWER lines — real, speakable replies to that exact question — then 2 tactical lines.
+- If NO: give 6 tactical lines and no ANSWER lines.
+Either way, mark your single strongest line with a ★ prefix.
 
-TYPES:
+ANSWER RULES (these matter most):
+- Write what the user says, in first person, ready to speak verbatim.
+- 1-3 sentences, 15-45 words. Spoken register, not written prose.
+- Answer the question directly in the first clause. No preamble, no "great question".
+- GROUNDING (do not break this): never state a number, duration, date, company, team, or past incident that does not already appear in the MEETING CONTEXT or CONVERSATION above. The user is saying this out loud and cannot retract a wrong fact.
+- When you want a specific you don't have, write it as a bracketed slot the user fills in — [X minutes], [tool], [team] — e.g. "we got it back in about [X] minutes". A bracketed slot is always better than a plausible guess.
+- Make the four answers genuinely different: one direct, one built on a concrete example, one short and safe, one that answers then hands the question back. Not four rewordings.
+
+TACTICAL TYPES:
 • PROBE: Strategic question to uncover more
 • INSIGHT: Pattern or observation you noticed
 • MIRROR: Echo key words as a question
@@ -1442,52 +1453,96 @@ TYPES:
 • CLARIFY: Get specifics on something unclear
 • LABEL: Name the emotion or dynamic
 
-RULES:
-- Each suggestion: 3-12 words, specific to conversation
-- No filler phrases
-- One suggestion MUST have ★ prefix (your top recommendation)
+Tactical lines stay 3-12 words. No filler phrases.
 
-FORMAT (exactly like this):
-★ PROBE: What's driving that timeline?
-INSIGHT: They keep circling back to cost
-MIRROR: The accessibility concern?
-PROBE: Who raised the PDF requirement?
-REFRAME: What if we phase the rollout?
-LABEL: Sounds like competing priorities"#,
+FORMAT — one suggestion per line, every line prefixed with its TYPE, nothing else in the reply:
+★ ANSWER: We moved to Argo CD, so a rollback is just re-syncing the previous revision — about two minutes end to end.
+ANSWER: The last time a bad image went out, I rolled the Helm release back and the old pods were serving again in about [X] minutes, before it reached [team].
+ANSWER: Short version — pinned tags plus GitOps, so a rollback is a revert.
+ANSWER: Rollbacks are a Helm revert for us. Are you asking about app deploys or cluster-level changes?
+PROBE: App-level rollbacks or cluster changes?
+CLARIFY: Which failure worries you most?"#,
         meeting_context_section, full_context, last_segment
     );
 
+    // Note: this deliberately overrides the default "be concise" system prompt —
+    // ANSWER lines need to be full spoken sentences, not clipped fragments.
+    const SUGGESTION_SYSTEM_PROMPT: &str = "You are an in-ear assistant feeding a person lines to say during a live conversation. Write the way people speak, in first person, ready to say out loud. ANSWER lines must be complete spoken sentences (15-45 words), never clipped fragments or note-taking shorthand. Output only the suggestion lines in the requested format.";
+
     eprintln!("Generating contextual auto replies from transcript...");
-    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    let response = groq::generate_with_system(
+        &api_key,
+        &model,
+        SUGGESTION_SYSTEM_PROMPT,
+        &prompt,
+        state.get_proxy_for_groq().as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     eprintln!("Got response from Groq");
 
-    let replies: Vec<String> = response
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            // Clean up but preserve the TYPE: format and ★ marker
-            let trimmed = line.trim();
-            // Remove leading numbers like "1." or "1)"
-            let cleaned = trimmed.trim_start_matches(|c: char| c.is_numeric() || c == '.' || c == ')' || c == '-').trim();
-            cleaned.to_string()
-        })
-        .filter(|line| {
-            // Keep lines that have TYPE: format (PROBE:, INSIGHT:, etc.) or start with ★
-            let upper = line.to_uppercase();
-            !line.is_empty() && (
-                upper.starts_with("PROBE:") || upper.starts_with("★ PROBE:") ||
-                upper.starts_with("INSIGHT:") || upper.starts_with("★ INSIGHT:") ||
-                upper.starts_with("MIRROR:") || upper.starts_with("★ MIRROR:") ||
-                upper.starts_with("REFRAME:") || upper.starts_with("★ REFRAME:") ||
-                upper.starts_with("CLARIFY:") || upper.starts_with("★ CLARIFY:") ||
-                upper.starts_with("LABEL:") || upper.starts_with("★ LABEL:")
-            )
-        })
-        .take(6)
-        .collect();
+    let replies = parse_suggestions(&response);
 
     *state.suggested_replies.lock().map_err(|e| e.to_string())? = replies.clone();
     Ok(replies)
+}
+
+/// Suggestion types the model may prefix a line with. ANSWER lines are the
+/// speakable replies; the rest are short tactical moves.
+const SUGGESTION_TYPES: [&str; 7] = [
+    "ANSWER", "PROBE", "INSIGHT", "MIRROR", "REFRAME", "CLARIFY", "LABEL",
+];
+
+/// True when the line opens a new suggestion, i.e. starts with `TYPE:`
+/// (optionally behind a ★ marker).
+fn starts_new_suggestion(line: &str) -> bool {
+    let upper = line.trim_start_matches('★').trim().to_uppercase();
+    SUGGESTION_TYPES.iter().any(|t| upper.starts_with(&format!("{}:", t)))
+}
+
+/// Parse the model's suggestion block into at most 6 suggestions.
+///
+/// ANSWER lines are full sentences, so they can wrap onto following lines —
+/// a line that doesn't open a new suggestion is folded into the previous one
+/// rather than dropped. Anything before the first typed line (e.g. "Here are
+/// six suggestions:") is ignored.
+fn parse_suggestions(response: &str) -> Vec<String> {
+    let mut replies: Vec<String> = Vec::new();
+
+    for raw_line in response.lines() {
+        // Strip list markers like "1." / "2)" / "- " but keep ★ and the TYPE: prefix
+        let cleaned = raw_line
+            .trim()
+            .trim_start_matches(|c: char| c.is_numeric() || c == '.' || c == ')' || c == '-')
+            .trim();
+        if cleaned.is_empty() {
+            continue;
+        }
+
+        if starts_new_suggestion(cleaned) {
+            if replies.len() == 6 {
+                break;
+            }
+            replies.push(cleaned.to_string());
+        } else if let Some(last) = replies.last_mut() {
+            // Wrapped continuation of the suggestion above
+            last.push(' ');
+            last.push_str(cleaned);
+        }
+    }
+
+    // If the model ignored the format entirely, show its lines rather than nothing
+    if replies.is_empty() {
+        return response
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .take(6)
+            .map(|l| l.to_string())
+            .collect();
+    }
+
+    replies
 }
 
 #[tauri::command]
@@ -2212,6 +2267,64 @@ mod tests {
     #[test]
     fn test_clean_transcript_empty_string() {
         assert_eq!(clean_transcript(""), "");
+    }
+
+    // Tests for suggestion parsing
+    #[test]
+    fn test_parse_suggestions_keeps_answer_lines() {
+        let response = "\
+★ ANSWER: We moved to Argo CD, so a rollback is re-syncing the previous revision.
+ANSWER: Short version — pinned tags plus GitOps, so a rollback is a revert.
+PROBE: App-level rollbacks or cluster changes?";
+        let replies = parse_suggestions(response);
+        assert_eq!(replies.len(), 3);
+        assert!(replies[0].starts_with("★ ANSWER:"));
+        assert!(replies[1].starts_with("ANSWER:"));
+        assert!(replies[2].starts_with("PROBE:"));
+    }
+
+    #[test]
+    fn test_parse_suggestions_folds_wrapped_answer() {
+        let response = "\
+ANSWER: Rollbacks are a Helm revert for us.
+Are you asking about app deploys or cluster changes?
+PROBE: Which failure worries you most?";
+        let replies = parse_suggestions(response);
+        assert_eq!(replies.len(), 2);
+        assert_eq!(
+            replies[0],
+            "ANSWER: Rollbacks are a Helm revert for us. Are you asking about app deploys or cluster changes?"
+        );
+    }
+
+    #[test]
+    fn test_parse_suggestions_ignores_preamble_and_numbering() {
+        let response = "\
+Here are 6 suggestions:
+
+1. ★ PROBE: What's driving that timeline?
+2. LABEL: Sounds like competing priorities";
+        let replies = parse_suggestions(response);
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0], "★ PROBE: What's driving that timeline?");
+        assert_eq!(replies[1], "LABEL: Sounds like competing priorities");
+    }
+
+    #[test]
+    fn test_parse_suggestions_caps_at_six() {
+        let response = (1..=9)
+            .map(|i| format!("PROBE: question number {}?", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(parse_suggestions(&response).len(), 6);
+    }
+
+    #[test]
+    fn test_parse_suggestions_falls_back_when_format_ignored() {
+        let response = "We should probably ask about the timeline.\nThey seem worried about cost.";
+        let replies = parse_suggestions(response);
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0], "We should probably ask about the timeline.");
     }
 
     // Tests for retry/exponential backoff logic
