@@ -330,7 +330,7 @@ function App() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) return;
 
       const keyNum = parseInt(e.key);
-      if (keyNum >= 1 && keyNum <= 4 && suggestedReplies.length >= keyNum) {
+      if (keyNum >= 1 && keyNum <= 6 && suggestedReplies.length >= keyNum) {
         handleCopyReply(suggestedReplies[keyNum - 1], keyNum - 1);
       }
     };

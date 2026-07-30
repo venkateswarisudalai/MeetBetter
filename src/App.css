@@ -2316,7 +2316,9 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px var(--sp-3);
+  /* extra bottom padding so the absolutely-positioned copy hint never
+     overlaps the last line of a multi-line answer */
+  padding: 10px var(--sp-3) 18px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
