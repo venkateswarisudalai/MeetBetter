@@ -258,8 +258,12 @@ mod tests {
         assert_eq!(settings.proxy_url, DEFAULT_PROXY_URL);
     }
 
+    /// Tests run in parallel threads but share one process environment; env tests take turns.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_env_override_groq_key() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut settings = AppSettings::default();
         assert!(settings.groq_api_key.is_empty());
 
@@ -274,6 +278,7 @@ mod tests {
 
     #[test]
     fn test_env_override_empty_value_no_change() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut settings = AppSettings {
             groq_api_key: "file-key".to_string(),
             ..AppSettings::default()
