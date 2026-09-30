@@ -147,7 +147,7 @@ Format: Return exactly 4 replies, numbered 1-4, one per line."#,
     );
 
     print!("  Generating reply suggestions... ");
-    match groq::generate(&api_key, "llama-3.1-8b-instant", &prompt).await {
+    match groq::generate(&api_key, groq::DEFAULT_MODEL, &prompt).await {
         Ok(response) => {
             println!("✓\n");
 
