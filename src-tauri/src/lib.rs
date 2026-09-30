@@ -14,6 +14,7 @@ mod deepgram;
 pub mod groq;  // Public for mock_test binary
 mod meeting_monitor;
 mod mock;
+mod ollama;
 mod realtime;
 mod screen_share;
 mod settings;
@@ -126,6 +127,38 @@ impl Default for AppState {
 }
 
 impl AppState {
+    fn uses_ollama(&self) -> bool {
+        self.settings.lock().map(|s| s.ai_provider == "ollama").unwrap_or(false)
+    }
+
+    /// Why AI can't run yet, if it can't.
+    fn ai_not_ready(&self) -> Option<String> {
+        if self.uses_ollama() {
+            return None; // checked when the request is made, with a clearer error
+        }
+        let no_key = self.groq_api_key.lock().map(|k| k.is_empty()).unwrap_or(true);
+        (no_key && self.get_proxy_for_groq().is_none())
+            .then(|| "Groq API key not set. Please add it in Settings, or choose Ollama to run AI on this Mac.".to_string())
+    }
+
+    /// Runs a summary or suggestion prompt on the chosen AI: Groq (cloud) or Ollama (on this Mac).
+    async fn ai_generate(&self, system: Option<&str>, prompt: &str) -> Result<String, String> {
+        let system = system.unwrap_or(groq::DEFAULT_SYSTEM_PROMPT);
+        if self.uses_ollama() {
+            let saved = self.settings.lock().map_err(|e| e.to_string())?.ollama_model.clone();
+            let installed = ollama::list_models().await.map_err(|_| {
+                "Can't reach Ollama. Install it from ollama.com, then run `ollama serve`.".to_string()
+            })?;
+            let model = ollama::pick_model(&installed, &saved)
+                .ok_or("Ollama has no models yet. Run `ollama pull qwen3:14b` (16 GB+ memory) or `ollama pull llama3.2`.")?;
+            return ollama::chat_with_system(&model, system, prompt).await.map_err(|e| e.to_string());
+        }
+        let model = self.selected_model.lock().map_err(|e| e.to_string())?.clone();
+        let api_key = self.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
+        let proxy = self.get_proxy_for_groq();
+        groq::generate_with_system(&api_key, &model, system, prompt, proxy.as_deref()).await.map_err(|e| e.to_string())
+    }
+
     /// Get the proxy URL if configured and Groq key is empty (demo mode).
     /// Returns Some(proxy_url) when the app should route through the proxy.
     fn get_proxy_for_groq(&self) -> Option<String> {
@@ -232,6 +265,9 @@ pub struct MeetingState {
     pub has_proxy: bool,
     pub current_recording_path: Option<String>,
     pub meeting_context: String,
+    /// "groq" or "ollama"
+    pub ai_provider: String,
+    pub ollama_model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -858,6 +894,8 @@ async fn get_meeting_state(state: State<'_, AppState>) -> Result<MeetingState, S
         has_proxy,
         current_recording_path: state.current_recording_path.lock().map_err(|e| e.to_string())?.clone(),
         meeting_context: state.meeting_context.lock().map_err(|e| e.to_string())?.clone(),
+        ai_provider: if state.uses_ollama() { "ollama".to_string() } else { "groq".to_string() },
+        ollama_model: state.settings.lock().map_err(|e| e.to_string())?.ollama_model.clone(),
     })
 }
 
@@ -961,6 +999,41 @@ async fn set_model(state: State<'_, AppState>, model: String) -> Result<(), Stri
     }
 
     Ok(())
+}
+
+/// Where summaries and suggestions run: "groq" or "ollama". An empty model picks the best installed one.
+#[tauri::command]
+async fn set_ai_provider(state: State<'_, AppState>, provider: String, ollama_model: String) -> Result<(), String> {
+    if provider != "groq" && provider != "ollama" {
+        return Err(format!("Unknown AI provider: {}", provider));
+    }
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    settings.ai_provider = provider;
+    settings.ollama_model = ollama_model;
+    if let Err(e) = settings.save() {
+        eprintln!("Failed to persist settings: {}", e);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OllamaStatus {
+    pub running: bool,
+    pub models: Vec<String>,
+    /// The model summaries will use (saved choice if installed, else the best installed).
+    pub chosen: Option<String>,
+}
+
+#[tauri::command]
+async fn get_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus, String> {
+    let saved = state.settings.lock().map_err(|e| e.to_string())?.ollama_model.clone();
+    match ollama::list_models().await {
+        Ok(models) => {
+            let chosen = ollama::pick_model(&models, &saved);
+            Ok(OllamaStatus { running: true, models, chosen })
+        }
+        Err(_) => Ok(OllamaStatus { running: false, models: vec![], chosen: None }),
+    }
 }
 
 #[tauri::command]
@@ -1081,8 +1154,8 @@ async fn clear_transcription(state: State<'_, AppState>) -> Result<(), String> {
 async fn transcribe_recording(state: State<'_, AppState>, file_path: String) -> Result<Vec<TranscriptSegment>, String> {
     let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
-        return Err("Groq API key not set. Please add it in Settings.".to_string());
+    if let Some(reason) = state.ai_not_ready() {
+        return Err(reason);
     }
 
     *state.is_transcribing.lock().map_err(|e| e.to_string())? = true;
@@ -1149,8 +1222,6 @@ pub struct MeetingSummary {
 #[tauri::command]
 async fn generate_summary(state: State<'_, AppState>) -> Result<String, String> {
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
-    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
-    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
 
     if transcription.is_empty() {
         return Err("No transcription to summarize".to_string());
@@ -1190,7 +1261,7 @@ MEETING TRANSCRIPT:
         transcript_text
     );
 
-    let summary = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    let summary = state.ai_generate(None, &prompt).await?;
     *state.summary.lock().map_err(|e| e.to_string())? = summary.clone();
     Ok(summary)
 }
@@ -1261,8 +1332,6 @@ fn parse_text_summary(text: &str) -> MeetingSummary {
 #[tauri::command]
 async fn generate_structured_summary(state: State<'_, AppState>) -> Result<MeetingSummary, String> {
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
-    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
-    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
 
     if transcription.is_empty() {
         return Err("No transcription to summarize".to_string());
@@ -1292,7 +1361,7 @@ MEETING TRANSCRIPT:
         transcript_text
     );
 
-    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    let response = state.ai_generate(None, &prompt).await?;
     eprintln!("Summary response from AI (first 500 chars): {}", &response.chars().take(500).collect::<String>());
 
     // Try to parse JSON response
@@ -1347,8 +1416,6 @@ async fn generate_reply_suggestions(
     state: State<'_, AppState>,
     context: String,
 ) -> Result<Vec<String>, String> {
-    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
-    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
 
     let recent_context: String = transcription
@@ -1365,7 +1432,7 @@ async fn generate_reply_suggestions(
         recent_context, context
     );
 
-    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    let response = state.ai_generate(None, &prompt).await?;
 
     let replies: Vec<String> = response
         .lines()
@@ -1383,13 +1450,11 @@ async fn generate_reply_suggestions(
 async fn generate_auto_replies(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
-    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
     let meeting_context = state.meeting_context.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
-        return Err("Groq API key not set. Please add it in Settings.".to_string());
+    if let Some(reason) = state.ai_not_ready() {
+        return Err(reason);
     }
 
     if transcription.is_empty() {
@@ -1460,16 +1525,8 @@ CLARIFY: Which failure worries you most?"#,
     const SUGGESTION_SYSTEM_PROMPT: &str = "You are an in-ear assistant feeding a person lines to say during a live conversation. Write the way people speak, in first person, ready to say out loud. ANSWER lines must be complete spoken sentences (15-45 words), never clipped fragments or note-taking shorthand. Output only the suggestion lines in the requested format.";
 
     eprintln!("Generating contextual auto replies from transcript...");
-    let response = groq::generate_with_system(
-        &api_key,
-        &model,
-        SUGGESTION_SYSTEM_PROMPT,
-        &prompt,
-        state.get_proxy_for_groq().as_deref(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    eprintln!("Got response from Groq");
+    let response = state.ai_generate(Some(SUGGESTION_SYSTEM_PROMPT), &prompt).await?;
+    eprintln!("Got suggestions response");
 
     let replies = parse_suggestions(&response);
 
@@ -1625,8 +1682,8 @@ async fn start_mock_transcription(
 
     // Get API key
     let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
-    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
-        return Err("Groq API key not set. Please add it in Settings.".to_string());
+    if let Some(reason) = state.ai_not_ready() {
+        return Err(reason);
     }
 
     // Set up stop signal
@@ -1939,12 +1996,10 @@ async fn enhance_notes(
     state: State<'_, AppState>,
     user_notes: String,
 ) -> Result<String, String> {
-    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
-    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
-        return Err("Groq API key not set".to_string());
+    if let Some(reason) = state.ai_not_ready() {
+        return Err(reason);
     }
 
     let transcript_text: String = transcription
@@ -1978,7 +2033,7 @@ Group into sections: Key Points, Action Items, Decisions, Additional Context"#,
         user_notes, transcript_text
     );
 
-    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    let response = state.ai_generate(None, &prompt).await?;
     Ok(response)
 }
 
@@ -1989,12 +2044,10 @@ async fn ask_about_meeting(
     question: String,
     user_notes: String,
 ) -> Result<String, String> {
-    let api_key = state.groq_api_key.lock().map_err(|e| e.to_string())?.clone();
-    let model = state.selected_model.lock().map_err(|e| e.to_string())?.clone();
     let transcription = state.transcription.lock().map_err(|e| e.to_string())?.clone();
 
-    if api_key.is_empty() && state.get_proxy_for_groq().is_none() {
-        return Err("No AI provider available".to_string());
+    if let Some(reason) = state.ai_not_ready() {
+        return Err(reason);
     }
 
     let transcript_text: String = transcription
@@ -2020,7 +2073,7 @@ Answer:"#,
         question
     );
 
-    let response = groq::generate_with_proxy(&api_key, &model, &prompt, state.get_proxy_for_groq().as_deref()).await.map_err(|e| e.to_string())?;
+    let response = state.ai_generate(None, &prompt).await?;
     Ok(response)
 }
 
@@ -2163,6 +2216,8 @@ pub fn run() {
             set_deepgram_api_key,
             set_proxy_url,
             set_model,
+            set_ai_provider,
+            get_ollama_status,
             set_transcription_provider,
             set_meeting_context,
             get_transcription_providers,

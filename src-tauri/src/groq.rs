@@ -9,6 +9,8 @@ const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
 /// Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss is its recommended replacement.
 pub const DEFAULT_MODEL: &str = "openai/gpt-oss-120b";
 
+pub const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful meeting assistant. Be concise and professional.";
+
 #[derive(Debug, Serialize)]
 struct ChatRequest {
     model: String,
@@ -69,7 +71,7 @@ pub async fn generate_with_proxy(api_key: &str, model: &str, prompt: &str, proxy
     generate_with_system(
         api_key,
         model,
-        "You are a helpful meeting assistant. Be concise and professional.",
+        DEFAULT_SYSTEM_PROMPT,
         prompt,
         proxy_url,
     )

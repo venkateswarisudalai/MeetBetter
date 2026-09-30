@@ -3263,3 +3263,41 @@ body {
   /* Auto-start options */
   .auto-start-options { background: #2A2A2A; }
 }
+
+/* AI provider choice (Settings) */
+.ai-provider-toggle {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.ai-provider-toggle button {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ai-provider-toggle button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.ollama-setup code {
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.12));
+}
+.api-input-row select {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  background: var(--bg);
+  color: inherit;
+}
+

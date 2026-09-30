@@ -34,6 +34,12 @@ pub struct AppSettings {
     /// When set and personal API keys are empty, the app routes through this proxy.
     #[serde(default = "default_proxy_url")]
     pub proxy_url: String,
+    /// Where summaries and suggestions run: "groq" (default, cloud) or "ollama" (on this Mac).
+    #[serde(default)]
+    pub ai_provider: String,
+    /// Ollama model; empty picks the best installed one.
+    #[serde(default)]
+    pub ollama_model: String,
 }
 
 fn default_proxy_url() -> String {
@@ -51,6 +57,8 @@ impl Default for AppSettings {
             meeting_context: String::new(),
             cloud_sync_enabled: false,
             proxy_url: DEFAULT_PROXY_URL.to_string(),
+            ai_provider: String::new(),
+            ollama_model: String::new(),
         }
     }
 }
@@ -209,6 +217,8 @@ mod tests {
             meeting_context: "Weekly standup".to_string(),
             cloud_sync_enabled: true,
             proxy_url: "https://example.com".to_string(),
+            ai_provider: "ollama".to_string(),
+            ollama_model: "qwen3:14b".to_string(),
         };
 
         let json = serde_json::to_string(&settings).unwrap();
@@ -222,6 +232,8 @@ mod tests {
         assert_eq!(deserialized.meeting_context, "Weekly standup");
         assert!(deserialized.cloud_sync_enabled);
         assert_eq!(deserialized.proxy_url, "https://example.com");
+        assert_eq!(deserialized.ai_provider, "ollama");
+        assert_eq!(deserialized.ollama_model, "qwen3:14b");
     }
 
     #[test]
