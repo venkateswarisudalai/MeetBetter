@@ -57,8 +57,8 @@ test-results */
 # Local Claude Code state
 .claude/
 
-# Local screencapturekit patch (vendored dependency)
-src-tauri/screencapturekit-patch/
+# Swift build output inside the vendored screencapturekit crate
+src-tauri/screencapturekit-patch/.build/
 
 # Build artifacts
 *.dmg
