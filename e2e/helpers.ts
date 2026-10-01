@@ -35,7 +35,11 @@ export async function installTauriMocks(page: Page) {
         has_deepgram_key: true,
         has_proxy: false,
         meeting_context: '',
+        ai_provider: 'groq',
+        ollama_model: '',
       },
+      get_ollama_status: { running: true, models: ['llama3.2:latest', 'qwen3:14b'], chosen: 'qwen3:14b' },
+      set_ai_provider: undefined,
       check_microphone_permission: 'granted',
       check_screen_recording_permission: 'granted',
       get_saved_meetings: [],
@@ -135,6 +139,9 @@ export async function installTauriMocks(page: Page) {
           }
           return;
         }
+
+        // Record calls so tests can check what the app sent
+        ((window as any).__TAURI_TEST_CALLS__ ??= []).push({ cmd, args });
 
         // Default command handling
         if (cmd in commandDefaults) {

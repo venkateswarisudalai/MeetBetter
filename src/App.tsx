@@ -77,6 +77,11 @@ function App() {
   const [hasGroqKey, setHasGroqKey] = useState(false);
   const [hasDeepgramKey, setHasDeepgramKey] = useState(false);
   const [hasProxy, setHasProxy] = useState(false);
+  // Where summaries and suggestions run: Groq (cloud) or Ollama (on this Mac)
+  const [aiProvider, setAiProvider] = useState<"groq" | "ollama">("groq");
+  const [ollamaModel, setOllamaModel] = useState("");
+  const [ollamaStatus, setOllamaStatus] = useState<{ running: boolean; models: string[]; chosen: string | null } | null>(null);
+  const aiReady = aiProvider === "ollama" || hasGroqKey || hasProxy;
   const [groqKeyInput, setGroqKeyInput] = useState("");
   const [deepgramKeyInput, setDeepgramKeyInput] = useState("");
   const [isEditingApiKey, setIsEditingApiKey] = useState(false);
@@ -393,6 +398,29 @@ function App() {
     return () => clearInterval(interval);
   }, [isCalendarConnected, meetingMonitorSettings.enabled]);
 
+  const refreshOllama = async () => {
+    try {
+      setOllamaStatus(await invoke("get_ollama_status"));
+    } catch {
+      setOllamaStatus({ running: false, models: [], chosen: null });
+    }
+  };
+
+  useEffect(() => {
+    if (showSettings && aiProvider === "ollama") refreshOllama();
+  }, [showSettings, aiProvider]);
+
+  const chooseAi = async (provider: "groq" | "ollama", model = ollamaModel) => {
+    try {
+      await invoke("set_ai_provider", { provider, ollamaModel: model });
+      setAiProvider(provider);
+      setOllamaModel(model);
+      if (provider === "ollama") refreshOllama();
+    } catch (error) {
+      console.error("Failed to set AI provider:", error);
+    }
+  };
+
   // API Functions
   const checkApiKeys = async () => {
     try {
@@ -401,7 +429,11 @@ function App() {
         has_deepgram_key: boolean;
         has_proxy: boolean;
         meeting_context: string;
+        ai_provider: "groq" | "ollama";
+        ollama_model: string;
       }>("get_meeting_state");
+      setAiProvider(state.ai_provider === "ollama" ? "ollama" : "groq");
+      setOllamaModel(state.ollama_model ?? "");
       setHasGroqKey(state.has_groq_key);
       setHasDeepgramKey(state.has_deepgram_key);
       setHasProxy(state.has_proxy);
@@ -603,7 +635,7 @@ function App() {
       setIsLiveTranscribing(false);
       if (audioPath) setSavedRecordingPath(audioPath);
 
-      if ((hasGroqKey || hasProxy) && transcription.length > 0) {
+      if (aiReady && transcription.length > 0) {
         setIsGeneratingSummary(true);
         try {
           const summaryResult = await invoke<MeetingSummary>("generate_structured_summary");
@@ -642,7 +674,7 @@ function App() {
   };
 
   const generateRepliesQuietly = async () => {
-    if (isGeneratingReplies || (!hasGroqKey && !hasProxy)) return;
+    if (isGeneratingReplies || !aiReady) return;
     setIsGeneratingReplies(true);
     setReplyError(null);
     try {
@@ -662,7 +694,7 @@ function App() {
   };
 
   const handleGenerateSummary = async () => {
-    if (transcription.length === 0 || (!hasGroqKey && !hasProxy)) return;
+    if (transcription.length === 0 || !aiReady) return;
     setIsLoading(true);
     setIsGeneratingSummary(true);
     try {
@@ -688,7 +720,7 @@ function App() {
   };
 
   const handleEnhanceNotes = async () => {
-    if (!userNotes.trim() || (!hasGroqKey && !hasProxy)) return;
+    if (!userNotes.trim() || !aiReady) return;
     setIsEnhancing(true);
     try {
       const result = await invoke<string>("enhance_notes", {
@@ -703,7 +735,7 @@ function App() {
   };
 
   const handleAskAboutMeeting = async () => {
-    if (!askAiQuestion.trim() || (!hasGroqKey && !hasProxy)) return;
+    if (!askAiQuestion.trim() || !aiReady) return;
     setIsAskingAi(true);
     setAskAiAnswer("");
     try {
@@ -1014,6 +1046,42 @@ function App() {
             </div>
 
             <div className="modal-content">
+              {/* AI provider */}
+              <div className="setting-item">
+                <label>AI for summaries &amp; suggestions</label>
+                <p className="setting-hint">Groq runs in the cloud. Ollama runs on this Mac, so transcripts never leave it.</p>
+                <div className="ai-provider-toggle" role="radiogroup" aria-label="AI provider">
+                  <button role="radio" aria-checked={aiProvider === "groq"} className={aiProvider === "groq" ? "active" : ""} onClick={() => chooseAi("groq")}>Groq (cloud)</button>
+                  <button role="radio" aria-checked={aiProvider === "ollama"} className={aiProvider === "ollama" ? "active" : ""} onClick={() => chooseAi("ollama")}>Ollama (on this Mac)</button>
+                </div>
+                {aiProvider === "ollama" && (
+                  <div className="ollama-setup">
+                    {ollamaStatus === null ? (
+                      <button className="text-btn" onClick={refreshOllama}>Check Ollama</button>
+                    ) : !ollamaStatus.running ? (
+                      <p className="setting-hint">
+                        Ollama isn't running. Install it from{" "}
+                        <span className="help-link" onClick={() => openUrl("https://ollama.com/download")}>ollama.com</span>, run{" "}
+                        <code>ollama pull qwen3:14b</code> (16 GB+ memory) or <code>ollama pull llama3.2</code>, then{" "}
+                        <button className="text-btn" onClick={refreshOllama}>check again</button>.
+                      </p>
+                    ) : ollamaStatus.models.length === 0 ? (
+                      <p className="setting-hint">
+                        Ollama is running but has no models. Run <code>ollama pull qwen3:14b</code> (16 GB+ memory) or{" "}
+                        <code>ollama pull llama3.2</code>, then <button className="text-btn" onClick={refreshOllama}>check again</button>.
+                      </p>
+                    ) : (
+                      <div className="api-input-row">
+                        <select aria-label="Ollama model" value={ollamaModel || ollamaStatus.chosen || ""} onChange={(e) => chooseAi("ollama", e.target.value)}>
+                          {ollamaStatus.models.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <button onClick={refreshOllama}>Refresh</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Groq API Key */}
               <div className="setting-item">
                 <label>Groq API Key</label>
@@ -1760,7 +1828,7 @@ function App() {
             </section>
 
             {/* Ask AI Section */}
-            {(hasGroqKey || hasProxy) && (
+            {aiReady && (
               <section className="ask-ai-section">
                 <h2>Ask AI</h2>
                 <p className="ask-ai-hint">Ask a question about this meeting — e.g. "What were the main action items?" or "Summarize what John said"</p>
