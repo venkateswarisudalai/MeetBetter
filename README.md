@@ -32,22 +32,21 @@ Vantage is a Tauri 2 desktop app (Rust backend, React 19 frontend) that does rea
 | **AI summaries and suggestions** | ✅ Fixed | Groq now uses `openai/gpt-oss-120b` (or `gpt-oss-20b`, faster). Groq retired the old Llama, Mixtral, and Gemma models on 2026-08-16; a saved retired model switches to the new default automatically |
 | **Local models (Ollama)** | ✅ Works (desktop) | Settings → *AI for summaries & suggestions* → **Ollama (on this Mac)**. Transcripts never leave the Mac and no Groq key is needed. See [Local AI with Ollama](#local-ai-with-ollama) |
 | **Windows / Linux desktop** | 🧪 Builds, mic only | GitHub Actions builds Windows (`.msi`, `.exe`) and Linux (`.deb`, `.AppImage`) installers on every push. They transcribe your microphone; hearing the other side of a call is macOS-only for now. Not yet tried on a real PC |
-| **Web app** (any computer) | ⚠️ Redeploy needed | Fixed in `web-app/`, but the hosted copy at [meetbetter-app.netlify.app](https://meetbetter-app.netlify.app) still runs the old build, so its summaries fail until it's redeployed. See [Known issues](#known-issues) |
+| **Web app** (any computer) | ✅ Works | [meetbetter-app.netlify.app](https://meetbetter-app.netlify.app): live transcription, tab + mic capture, summary, "ask about this meeting", history in the browser. See [Run it in the browser](#run-it-in-the-browser) |
 | **Browser extension** | 🧪 Prototype | Detects Meet, Zoom, and Teams tabs. Load it unpacked from `browser-extension/`; not in the Chrome Web Store |
 
 ### Known issues
 
-- **The hosted web app's summaries fail** with `HTTP 404: The model llama-3.3-70b-versatile does not exist`. The fix is merged; [meetbetter-app.netlify.app](https://meetbetter-app.netlify.app) needs a redeploy (`cd web-app && npm run build`, then deploy `web-app/dist`).
 - **Windows and Linux hear only the microphone.** Everything shows as "You" there until system-audio capture is added (see below).
 - **Builds without the Google/Supabase keys** (forks, CI, a fresh clone without `.env.build`) work, but Google Calendar and cloud sync are turned off in that build. See [Compile-time secrets](#compile-time-secrets).
 
 ### What's next
 
-1. Redeploy the hosted web app.
-2. Try the Windows and Linux installers on real machines (download them from a [Desktop build](https://github.com/venkateswarisudalai/MeetBetter/actions/workflows/desktop-build.yml) run's **Artifacts**).
-3. Hear the other side of calls on Windows (WASAPI loopback, no driver needed) and Linux (PipeWire/PulseAudio monitor source).
-4. Local models in the web app.
-5. Publish the browser extension.
+1. Try the Windows and Linux installers on real machines (download them from a [Desktop build](https://github.com/venkateswarisudalai/MeetBetter/actions/workflows/desktop-build.yml) run's **Artifacts**).
+2. Hear the other side of calls on Windows (WASAPI loopback, no driver needed) and Linux (PipeWire/PulseAudio monitor source).
+3. Local models in the web app.
+4. Publish the browser extension.
+5. Deploy the web app automatically on merge (today it's deployed by hand: `cd web-app && npm run build`, then publish `web-app/dist` to Netlify).
 
 ## Features
 
