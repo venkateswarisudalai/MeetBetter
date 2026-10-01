@@ -29,22 +29,24 @@ Vantage is a Tauri 2 desktop app (Rust backend, React 19 frontend) that does rea
 | | Status | Notes |
 |---|---|---|
 | **Desktop app** (macOS) | ✅ Works | Live transcription, You vs Participant (with BlackHole), calendar auto-start, meeting-app detection, summaries, reply suggestions, saved meetings |
+| **AI summaries and suggestions** | ✅ Fixed | Groq now uses `openai/gpt-oss-120b` (or `gpt-oss-20b`, faster). Groq retired the old Llama, Mixtral, and Gemma models on 2026-08-16; a saved retired model switches to the new default automatically |
+| **Local models (Ollama)** | ✅ Works (desktop) | Settings → *AI for summaries & suggestions* → **Ollama (on this Mac)**. Transcripts never leave the Mac and no Groq key is needed. See [Local AI with Ollama](#local-ai-with-ollama) |
+| **Windows / Linux desktop** | 🧪 Builds, mic only | GitHub Actions builds Windows (`.msi`, `.exe`) and Linux (`.deb`, `.AppImage`) installers on every push. They transcribe your microphone; hearing the other side of a call is macOS-only for now. Not yet tried on a real PC |
 | **Web app** (any computer) | ✅ Works | [meetbetter-app.netlify.app](https://meetbetter-app.netlify.app): live transcription, tab + mic capture, summary, "ask about this meeting", history in the browser. See [Run it in the browser](#run-it-in-the-browser) |
 | **Browser extension** | 🧪 Prototype | Detects Meet, Zoom, and Teams tabs. Load it unpacked from `browser-extension/`; not in the Chrome Web Store |
-| **AI summaries and suggestions** | ⚠️ Broken until fixed | Groq retired `llama-3.3-70b-versatile` on 2026-08-16, and every model in the picker is retired too. See [Known issues](#known-issues) |
-| **Local models (Ollama)** | ❌ Not yet | `src-tauri/src/ollama.rs` is a start, but it isn't compiled (`lib.rs` doesn't declare it) or connected to Settings. Everything AI goes to Groq today |
-| **Windows / Linux desktop** | ❌ Not yet | Audio capture uses ScreenCaptureKit + cpal on macOS only. Windows and Linux users can use the web app |
 
 ### Known issues
 
-- **Summaries and suggestions fail with `HTTP 404: The model llama-3.3-70b-versatile does not exist`.** Groq shut the model down on 2026-08-16 ([deprecations](https://console.groq.com/docs/deprecations)); `llama-3.1-8b-instant`, `mixtral-8x7b-32768`, and `gemma2-9b-it` are gone as well. The fix is to default to `openai/gpt-oss-120b`, Groq's recommended replacement, in `src-tauri/src/groq.rs`, `src-tauri/src/settings.rs`, `src-tauri/src/lib.rs`, and `web-app/src/lib/groq.ts`, and to refresh the model list in Settings.
+- **Windows and Linux hear only the microphone.** Everything shows as "You" there until system-audio capture is added (see below).
+- **Builds without the Google/Supabase keys** (forks, CI, a fresh clone without `.env.build`) work, but Google Calendar and cloud sync are turned off in that build. See [Compile-time secrets](#compile-time-secrets).
 
 ### What's next
 
-1. Move off the retired Groq models (above).
-2. Local models: declare `mod ollama` in `lib.rs`, add Ollama as an AI provider in Settings, and use it for summaries and suggestions. On a Mac with 16 GB+ of memory, `qwen3:14b` writes good notes; send `"think": false` so replies take seconds, not a minute. `llama3.2` (2 GB) works on smaller machines.
-3. Publish the browser extension.
-4. Windows and Linux desktop audio.
+1. Try the Windows and Linux installers on real machines (download them from a [Desktop build](https://github.com/venkateswarisudalai/MeetBetter/actions/workflows/desktop-build.yml) run's **Artifacts**).
+2. Hear the other side of calls on Windows (WASAPI loopback, no driver needed) and Linux (PipeWire/PulseAudio monitor source).
+3. Local models in the web app.
+4. Publish the browser extension.
+5. Deploy the web app automatically on merge (today it's deployed by hand: `cd web-app && npm run build`, then publish `web-app/dist` to Netlify).
 
 ## Features
 
@@ -70,7 +72,7 @@ Vantage is a Tauri 2 desktop app (Rust backend, React 19 frontend) that does rea
 
 ## Run it locally
 
-> Vantage is currently macOS-only (12.3+). The Rust backend uses ScreenCaptureKit + cpal for audio, so Windows/Linux dev hasn't been wired up yet.
+> The full experience is on macOS (12.3+). Windows and Linux build and run with microphone-only transcription; see [Windows and Linux](#windows-and-linux).
 
 ### Prerequisites
 
@@ -80,12 +82,13 @@ Vantage is a Tauri 2 desktop app (Rust backend, React 19 frontend) that does rea
 | **Node.js** | 18+ (tested on 22) | `brew install node` or [nodejs.org](https://nodejs.org/) |
 | **Rust** | stable | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | **BlackHole 2ch** *(optional)* | 2.x | `brew install blackhole-2ch` — only needed for dual-channel "You" vs "Participant" audio |
+| **Ollama** *(optional)* | any | [ollama.com/download](https://ollama.com/download) — only for running the AI on your own Mac |
 
 ### Three things you can run
 
 ```bash
 git clone https://github.com/venkateswarisudalai/MeetBetter.git
-cd Vantage
+cd MeetBetter
 npm install
 ```
 
@@ -107,13 +110,27 @@ npm run test:e2e:headed    # see the browser
 npm run test:e2e:report    # open last HTML report
 ```
 
+A fresh clone builds as-is: the patched `screencapturekit` crate is vendored in `src-tauri/screencapturekit-patch/` (see its `PATCH.md`).
+
 ### Compile-time secrets
 
-Google OAuth and Supabase keys are baked into the Rust binary via `env!()`. The defaults live in `.env.build` at the repo root and are auto-loaded by `src-tauri/build.rs` — no shell sourcing needed. To override, set the env vars in your shell before building:
+Google OAuth and Supabase keys are baked into the Rust binary via `env!()`. They're read from `.env.build` at the repo root (not committed) or from your shell, and auto-loaded by `src-tauri/build.rs`:
 
 ```bash
-GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… npm run tauri dev
+GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… SUPABASE_URL=… SUPABASE_ANON_KEY=… npm run tauri dev
 ```
+
+Without them the build still succeeds, with a warning, and Google Calendar and cloud sync are turned off in that build. In GitHub Actions, add them as repository secrets with the same names.
+
+### Windows and Linux
+
+Install Node.js and Rust as above. On Linux, also install Tauri's system libraries:
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev patchelf
+```
+
+Then `npm run tauri dev` or `npm run tauri build`. Every push also builds installers in GitHub Actions ([Desktop build](https://github.com/venkateswarisudalai/MeetBetter/actions/workflows/desktop-build.yml) → a run → **Artifacts**). On both, the app transcribes your microphone only for now.
 
 ### Per-user API keys
 
@@ -125,6 +142,18 @@ cp .env.example .env
 ```
 
 The app should launch automatically on `npm run tauri dev`. If `cargo` is missing, `source $HOME/.cargo/env` (or restart your terminal).
+
+## Local AI with Ollama
+
+Run summaries and suggestions on your own Mac instead of Groq: transcripts never leave it, and you don't need a Groq key. Transcription itself still uses Deepgram.
+
+1. Install [Ollama](https://ollama.com/download) and start it (`ollama serve`, or open the app).
+2. Download a model:
+   - **16 GB+ of memory:** `ollama pull qwen3:14b` (recommended, about 9 GB)
+   - **Smaller machines:** `ollama pull llama3.2` (2 GB; works, but summaries are more generic)
+3. In MeetBetter, open **Settings → AI for summaries & suggestions → Ollama (on this Mac)**. Your installed models appear in the list, with the best one preselected; **Refresh** picks up new ones.
+
+MeetBetter turns off Ollama's "thinking" mode so replies come back in seconds instead of about a minute with `qwen3`, and sizes the context window to the meeting so long transcripts aren't cut off. A `qwen3:14b` summary takes about 15–20 seconds on an M1 Pro, including loading the model.
 
 ## Run it in the browser
 
@@ -151,7 +180,7 @@ npm run test:e2e     # Playwright tests
 npm run build        # static files in web-app/dist, deployable to Netlify or GitHub Pages
 ```
 
-AI summaries in the web app use Groq too, so they're affected by the [known issue](#known-issues) until it's fixed.
+AI summaries in the web app use Groq (`openai/gpt-oss-120b`). Local models aren't available in the web app yet.
 
 ## First-run setup
 
@@ -346,8 +375,7 @@ You only need **2 free API keys** to get started. Calendar and cloud sync are bu
    - 💡 Keep speaker volume low to prevent feedback
 
 #### Windows/Linux:
-- Windows: Install [VB-Cable](https://vb-audio.com/Cable/) (similar setup)
-- Linux: Use PulseAudio loopback
+Not supported yet: the desktop app hears only the microphone there. See [What's next](#whats-next).
 
 #### Without BlackHole:
 ✅ App works normally, but all audio shows as "You"
@@ -376,10 +404,10 @@ You only need **2 free API keys** to get started. Calendar and cloud sync are bu
 | **Frontend** | React + TypeScript + Vite |
 | **Backend** | Rust + Tauri 2.0 |
 | **Transcription** | Deepgram `nova-3` (real-time, multichannel), AssemblyAI (batch) |
-| **AI/LLM** | Groq (`llama-3.3-70b-versatile`, retired 2026-08-16; see [Known issues](#known-issues)) |
+| **AI/LLM** | Groq (`openai/gpt-oss-120b`, `gpt-oss-20b`) or local Ollama (`qwen3:14b`, `llama3.2`, …) |
 | **Audio** | cpal (cross-platform audio capture) |
 | **Calendar** | Google Calendar OAuth2 integration |
-| **Virtual Audio** | BlackHole 2ch (macOS), VB-Cable (Windows) |
+| **Virtual Audio** | BlackHole 2ch (macOS) |
 | **Styling** | CSS with dark mode support |
 
 ## Project Structure
@@ -399,7 +427,9 @@ vantage/
 │   │   ├── database.rs       # SQLite meeting storage
 │   │   ├── settings.rs       # Per-user keys & preferences
 │   │   └── audio.rs          # Microphone capture
-│   ├── build.rs              # macOS link flags + auto-loads ../.env.build
+│   │   ├── ollama.rs         # Local AI through Ollama
+│   ├── screencapturekit-patch/ # Vendored screencapturekit 1.5.0 + one build fix (PATCH.md)
+│   ├── build.rs              # macOS link flags + loads ../.env.build (optional)
 │   └── Cargo.toml
 ├── e2e/                      # Playwright tests against the mocked frontend
 ├── playwright.config.ts
@@ -409,7 +439,8 @@ vantage/
 ├── proxy/                    # Optional Cloudflare Worker proxy for demo mode
 ├── scripts/sign-and-package.sh
 ├── switch-audio.sh           # BlackHole audio routing helper
-├── .env.build                # Compile-time secrets (Google OAuth, Supabase)
+├── .github/workflows/        # Desktop build: tests + Windows/Linux installers
+├── .env.build                # Compile-time secrets (Google OAuth, Supabase); not committed
 ├── .env.example              # Template for runtime API keys
 └── package.json
 ```
@@ -450,17 +481,18 @@ npm run test:e2e    # Playwright suite
 - [x] Meeting auto-start detection
 - [x] Web app for any computer (`web-app/`)
 - [x] Browser extension (prototype, load unpacked)
-- [ ] Move off the retired Groq models
+- [x] Move off the retired Groq models
+- [x] Windows and Linux builds (microphone only)
 - [ ] Outlook calendar support
 - [ ] Speaker diarization (identify multiple participants)
 - [ ] Export to various formats (PDF, Word, Markdown)
 - [ ] Meeting templates
 - [ ] Keyboard shortcuts
-- [ ] Local LLM support (Ollama): started in `ollama.rs`, not wired up yet
+- [x] Local LLM support (Ollama) in the desktop app
 - [ ] Publish the browser extension to the Chrome Web Store
 - [ ] Mobile companion app
 - [ ] Multi-language support
-- [ ] Windows/Linux dual audio support
+- [ ] Windows/Linux dual audio support (hear the other side of calls)
 
 ## FAQ
 
@@ -468,13 +500,13 @@ npm run test:e2e    # Playwright suite
 A: No. Audio is processed in real-time and only the transcription text is sent to APIs. Nothing is stored on external servers.
 
 **Q: Can I use this without internet?**
-A: Recording works offline, but transcription and AI features need an internet connection today. Local models through Ollama are planned; see [What's next](#whats-next).
+A: Recording works offline. Transcription needs the internet (Deepgram). AI summaries and suggestions can run offline with [Ollama](#local-ai-with-ollama).
 
 **Q: Can I run the AI on my own computer?**
-A: Not in MeetBetter yet: all AI goes to Groq. Local support is the next planned feature.
+A: Yes, in the desktop app: choose **Ollama (on this Mac)** in Settings. See [Local AI with Ollama](#local-ai-with-ollama).
 
 **Q: Does it work on Windows or Linux?**
-A: The desktop app is macOS-only, but the [web app](#run-it-in-the-browser) works in Chrome or Edge on any computer.
+A: The desktop app builds for both and transcribes your microphone; hearing the other side of a call is macOS-only for now. The [web app](#run-it-in-the-browser) works in Chrome or Edge on any computer and can hear a shared tab.
 
 **Q: Which API should I get first?**
 A: Start with Deepgram (for transcription) + Groq (for AI). Both have generous free tiers.
@@ -492,7 +524,7 @@ A: Yes! Create a Multi-Output Device in Audio MIDI Setup that includes both Blac
 A: Yes! The app detects when Zoom, Teams, Google Meet, Webex, or Slack processes are running and can auto-start transcription based on your calendar events.
 
 **Q: Will dual audio capture work on Windows/Linux?**
-A: Currently, dual audio is macOS-only with BlackHole. Windows users can use VB-Cable with similar setup. Linux support is planned for future releases.
+A: Not yet. On Windows and Linux the desktop app hears only your microphone, so everything shows as "You". Capturing what's playing (WASAPI loopback on Windows, the PipeWire/PulseAudio monitor on Linux) is next on the roadmap. Meanwhile, the [web app](#run-it-in-the-browser) can hear a call in a shared Chrome tab on any OS.
 
 ## Troubleshooting
 
