@@ -43,7 +43,9 @@ fn main() {
 fn load_build_env() {
     let path = std::path::Path::new("../.env.build");
     println!("cargo:rerun-if-changed=../.env.build");
+    let mut from_file = Vec::new();
     let Ok(contents) = std::fs::read_to_string(path) else {
+        default_missing_build_env(&from_file);
         return;
     };
     for line in contents.lines() {
@@ -59,6 +61,22 @@ fn load_build_env() {
         if std::env::var_os(key).is_some() {
             continue;
         }
+        from_file.push(key.to_string());
         println!("cargo:rustc-env={}={}", key, value);
+    }
+    default_missing_build_env(&from_file);
+}
+
+/// Keys calendar.rs and supabase.rs read with `env!()`. Without them the build still succeeds
+/// (CI, fresh clones); Google Calendar and cloud sync just stay unavailable in that build.
+const BUILD_KEYS: [&str; 4] = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SUPABASE_URL", "SUPABASE_ANON_KEY"];
+
+fn default_missing_build_env(from_file: &[String]) {
+    for key in BUILD_KEYS {
+        println!("cargo:rerun-if-env-changed={}", key);
+        if std::env::var_os(key).is_none() && !from_file.iter().any(|k| k == key) {
+            println!("cargo:warning={} not set (.env.build or env): Google Calendar / cloud sync disabled in this build", key);
+            println!("cargo:rustc-env={}=", key);
+        }
     }
 }
