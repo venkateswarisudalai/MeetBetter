@@ -4,6 +4,10 @@ use std::path::Path;
 
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_WHISPER_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+const GROQ_MODELS_URL: &str = "https://api.groq.com/openai/v1/models";
+
+/// Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss is its recommended replacement.
+pub const DEFAULT_MODEL: &str = "openai/gpt-oss-120b";
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -11,6 +15,14 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     temperature: f32,
     max_tokens: u32,
+    /// gpt-oss reasons before answering, and the reasoning counts toward `max_tokens`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'static str>,
+}
+
+/// Keep gpt-oss's reasoning short so the answer fits the token budget and arrives fast.
+fn reasoning_effort_for(model: &str) -> Option<&'static str> {
+    model.starts_with("openai/gpt-oss").then_some("low")
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,15 +41,21 @@ struct Choice {
     message: ChatMessage,
 }
 
-/// Available Groq models (current as of 2025)
+/// Available Groq models (current as of 2026-09; see console.groq.com/docs/deprecations)
 pub fn get_available_models() -> Vec<(&'static str, &'static str)> {
     vec![
-        ("llama-3.3-70b-versatile", "Llama 3.3 70B (Best)"),
-        ("llama-3.1-8b-instant", "Llama 3.1 8B (Fast)"),
-        ("llama-3.3-70b-specdec", "Llama 3.3 70B SpecDec"),
-        ("mixtral-8x7b-32768", "Mixtral 8x7B"),
-        ("gemma2-9b-it", "Gemma 2 9B"),
+        ("openai/gpt-oss-120b", "GPT-OSS 120B (Best)"),
+        ("openai/gpt-oss-20b", "GPT-OSS 20B (Fast)"),
     ]
+}
+
+/// The saved model if Groq still offers it here, otherwise the default (for retired models).
+pub fn current_model(saved: &str) -> String {
+    if get_available_models().iter().any(|(id, _)| *id == saved) {
+        saved.to_string()
+    } else {
+        DEFAULT_MODEL.to_string()
+    }
 }
 
 /// Generate a response using Groq API with automatic rate limit retry.
@@ -93,6 +111,7 @@ pub async fn generate_with_system(
         messages,
         temperature: 0.7,
         max_tokens: 1024,
+        reasoning_effort: reasoning_effort_for(model),
     };
 
     // Determine endpoint and auth
@@ -175,21 +194,10 @@ pub async fn check_api_key(api_key: &str) -> Result<bool> {
 
     let client = reqwest::Client::new();
 
-    let request = ChatRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
-        messages: vec![ChatMessage {
-            role: "user".to_string(),
-            content: "Hi".to_string(),
-        }],
-        temperature: 0.1,
-        max_tokens: 5,
-    };
-
+    // Listing models checks the key without depending on any one model (they get retired).
     let response = client
-        .post(GROQ_API_URL)
+        .get(GROQ_MODELS_URL)
         .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&request)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await;
@@ -401,8 +409,29 @@ mod tests {
     #[test]
     fn test_get_available_models_has_default() {
         let models = get_available_models();
-        let has_default = models.iter().any(|(id, _)| *id == "llama-3.3-70b-versatile");
-        assert!(has_default, "Default model llama-3.3-70b-versatile should be available");
+        let has_default = models.iter().any(|(id, _)| *id == DEFAULT_MODEL);
+        assert!(has_default, "Default model {} should be available", DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn test_retired_models_are_not_offered() {
+        let models = get_available_models();
+        for retired in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"] {
+            assert!(!models.iter().any(|(id, _)| *id == retired), "{} is retired", retired);
+        }
+    }
+
+    #[test]
+    fn test_current_model_migrates_retired_and_keeps_current() {
+        assert_eq!(current_model("llama-3.3-70b-versatile"), DEFAULT_MODEL);
+        assert_eq!(current_model(""), DEFAULT_MODEL);
+        assert_eq!(current_model("openai/gpt-oss-20b"), "openai/gpt-oss-20b");
+    }
+
+    #[test]
+    fn test_reasoning_effort_only_for_gpt_oss() {
+        assert_eq!(reasoning_effort_for("openai/gpt-oss-120b"), Some("low"));
+        assert_eq!(reasoning_effort_for("some-other-model"), None);
     }
 
     #[test]
@@ -436,17 +465,21 @@ mod tests {
     #[test]
     fn test_chat_request_serialization() {
         let req = ChatRequest {
-            model: "llama-3.3-70b-versatile".to_string(),
+            model: DEFAULT_MODEL.to_string(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "test".to_string(),
             }],
             temperature: 0.7,
             max_tokens: 1024,
+            reasoning_effort: reasoning_effort_for(DEFAULT_MODEL),
         };
         let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains("llama-3.3-70b-versatile"));
+        assert!(json.contains("openai/gpt-oss-120b"));
         assert!(json.contains("\"max_tokens\":1024"));
+        assert!(json.contains("\"reasoning_effort\":\"low\""));
+        let other = ChatRequest { model: "x".into(), messages: vec![], temperature: 0.1, max_tokens: 5, reasoning_effort: None };
+        assert!(!serde_json::to_string(&other).unwrap().contains("reasoning_effort"));
     }
 
     #[test]
@@ -465,7 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_empty_key_no_proxy_errors() {
-        let result = generate("", "llama-3.3-70b-versatile", "Hello").await;
+        let result = generate("", DEFAULT_MODEL, "Hello").await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("API key not set"), "Expected API key error, got: {}", err);

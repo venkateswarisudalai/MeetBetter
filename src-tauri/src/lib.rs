@@ -84,18 +84,8 @@ impl Default for AppState {
             _ => TranscriptionProvider::Deepgram,
         };
 
-        // Use saved model or default
-        let model = if saved_settings.selected_model.is_empty() {
-            "llama-3.3-70b-versatile".to_string()
-        } else {
-            // Migrate deprecated models to new defaults
-            let saved = &saved_settings.selected_model;
-            if saved == "llama-3.2-90b-vision-preview" || saved == "llama-3.2-11b-vision-preview" || saved == "llama-3.1-70b-versatile" {
-                "llama-3.3-70b-versatile".to_string()
-            } else {
-                saved.clone()
-            }
-        };
+        // Use the saved model, or the default if it's empty or Groq has retired it
+        let model = groq::current_model(&saved_settings.selected_model);
 
         eprintln!("Loaded settings - Groq key present: {}, Model: {}",
             !saved_settings.groq_api_key.is_empty(), model);

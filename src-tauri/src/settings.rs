@@ -204,7 +204,7 @@ mod tests {
             groq_api_key: "test-groq-key".to_string(),
             assemblyai_api_key: "test-aai-key".to_string(),
             deepgram_api_key: "test-dg-key".to_string(),
-            selected_model: "llama-3.3-70b-versatile".to_string(),
+            selected_model: "openai/gpt-oss-120b".to_string(),
             transcription_provider: "deepgram".to_string(),
             meeting_context: "Weekly standup".to_string(),
             cloud_sync_enabled: true,
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(deserialized.groq_api_key, "test-groq-key");
         assert_eq!(deserialized.assemblyai_api_key, "test-aai-key");
         assert_eq!(deserialized.deepgram_api_key, "test-dg-key");
-        assert_eq!(deserialized.selected_model, "llama-3.3-70b-versatile");
+        assert_eq!(deserialized.selected_model, "openai/gpt-oss-120b");
         assert_eq!(deserialized.transcription_provider, "deepgram");
         assert_eq!(deserialized.meeting_context, "Weekly standup");
         assert!(deserialized.cloud_sync_enabled);

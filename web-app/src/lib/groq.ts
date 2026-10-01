@@ -1,3 +1,6 @@
+// Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss is its recommended replacement.
+const GROQ_MODEL = 'openai/gpt-oss-120b';
+
 export async function generateSummary(
   apiKey: string,
   transcript: string,
@@ -27,7 +30,9 @@ ${meetingContext ? `Meeting Context: ${meetingContext}` : ''}`;
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: GROQ_MODEL,
+      // gpt-oss reasons first, and the reasoning counts toward max_tokens.
+      reasoning_effort: 'low',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Here is the meeting transcript:\n\n${transcript}` },
@@ -58,7 +63,9 @@ export async function askAboutMeeting(
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: GROQ_MODEL,
+      // gpt-oss reasons first, and the reasoning counts toward max_tokens.
+      reasoning_effort: 'low',
       messages: [
         {
           role: 'system',
